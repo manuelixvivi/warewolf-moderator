@@ -9,7 +9,7 @@ const ALL_ROLES: RoleData[] = rolesJson as RoleData[];
 
 const THEMES = ["Dark Fantasy", "Horror Gothic", "Medieval", "Modern", "Cosmic Horror", "Custom"];
 const STYLES = ["Dramatic", "Atmospheric", "Brief", "Comic", "Mysterious"];
-const CATEGORIES = ["Semua", "Village", "Werewolf", "Neutral", "Independent", "Special", "Artifact"];
+const CATEGORIES = ["Semua", "Village", "Werewolf", "Neutral", "Independent", "Special"];
 
 export default function GameSetupScreen() {
   const { config, setConfig, initPlayers } = useGameStore();
@@ -21,9 +21,15 @@ export default function GameSetupScreen() {
 
   const filteredRoles = useMemo(() => {
     return ALL_ROLES.filter((r) => {
-      // Filter out non-playable roles
-      if (r.entity_type === "Artifact" && filterCategory === "Semua") return true;
-      if (r.canonical_name === "Moderator") return false;
+      // Filter out non-playable roles, artifacts, and utilities
+      if (r.entity_type === "Artifact" || r.entity_type === "Utility") return false;
+      if (
+        r.canonical_name === "Moderator" ||
+        r.canonical_name === "Blank Cards" ||
+        r.canonical_name.toLowerCase().includes("amulet")
+      ) {
+        return false;
+      }
 
       const matchCat =
         filterCategory === "Semua" ||
@@ -33,7 +39,8 @@ export default function GameSetupScreen() {
       const matchSearch =
         !searchQuery ||
         r.canonical_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        r.description_en.toLowerCase().includes(searchQuery.toLowerCase());
+        (r.description_en && r.description_en.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (r.description_id && r.description_id.toLowerCase().includes(searchQuery.toLowerCase()));
 
       return matchCat && matchSearch;
     });

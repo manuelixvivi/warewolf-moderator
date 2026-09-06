@@ -76,8 +76,15 @@ export default function RoleCard({ role, count, onIncrement, onDecrement, disabl
         </div>
 
         {/* Tooltip Button */}
-        <Tooltip content={tooltipText}>
-          <button className="ml-2 w-6 h-6 rounded-full bg-gray-700 hover:bg-purple-700 text-gray-300 hover:text-white text-xs font-bold flex items-center justify-center transition-colors flex-shrink-0">
+        <Tooltip
+          roleName={role.canonical_name}
+          contentId={role.description_id || role.tooltip_id}
+          contentEn={role.tooltip_en || role.description_en}
+        >
+          <button
+            type="button"
+            className="ml-2 w-7 h-7 rounded-full bg-gray-800 hover:bg-purple-700 text-gray-300 hover:text-white border border-gray-600 hover:border-purple-500 text-xs font-bold flex items-center justify-center transition-all flex-shrink-0 shadow-sm"
+          >
             ?
           </button>
         </Tooltip>

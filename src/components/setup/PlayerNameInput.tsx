@@ -107,25 +107,53 @@ export default function PlayerNameInput() {
               key={sr.role_id}
               className="bg-gray-900 border border-gray-700 rounded-xl p-4"
             >
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">{teamEmoji}</span>
-                <h3 className="font-bold text-white">{sr.canonical_name}</h3>
-                <span className="text-xs text-gray-400 bg-gray-800 px-2 py-0.5 rounded-full">
-                  {sr.count} pemain
-                </span>
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">{teamEmoji}</span>
+                  <h3 className="font-bold text-white text-base">{sr.canonical_name}</h3>
+                  <span className="text-xs text-gray-400 bg-gray-800 px-2 py-0.5 rounded-full">
+                    {sr.count} pemain
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-xs px-2.5 py-1 rounded-full font-bold border flex items-center gap-1.5 shadow-sm ${
+                      roleData?.seer_result === "Werewolf"
+                        ? "bg-red-950/90 border-red-500 text-red-200 shadow-red-950"
+                        : "bg-emerald-950/90 border-emerald-500 text-emerald-200 shadow-emerald-950"
+                    }`}
+                  >
+                    <span>🔮 Hasil Seer:</span>
+                    <span className="underline decoration-wavy underline-offset-2">
+                      {roleData?.seer_result === "Werewolf" ? "🐺 Werewolf" : "🧑 Villager"}
+                    </span>
+                  </span>
+                </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {names.map((name, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <span className="text-gray-500 text-sm w-6 text-right">{i + 1}.</span>
+                    <span className="text-gray-500 text-sm w-6 text-right font-mono">{i + 1}.</span>
                     <input
                       type="text"
                       value={name}
                       onChange={(e) => handleNameChange(sr.role_id, i, e.target.value)}
                       placeholder={`Nama pemain ${i + 1}`}
-                      className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                      className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 text-sm"
                     />
+                    {name.trim() && (
+                      <span
+                        className={`text-xs font-bold px-3 py-1.5 rounded-lg border shrink-0 flex items-center gap-1.5 animate-fadeIn ${
+                          roleData?.seer_result === "Werewolf"
+                            ? "bg-red-900/80 border-red-500 text-red-100 shadow-sm shadow-red-900"
+                            : "bg-emerald-900/80 border-emerald-500 text-emerald-100 shadow-sm shadow-emerald-900"
+                        }`}
+                        title="Status pemeriksaan Seer untuk pemain ini"
+                      >
+                        {roleData?.seer_result === "Werewolf" ? "🐺 WEREWOLF" : "🧑 VILLAGER"}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

@@ -1,28 +1,5 @@
 [
   {
-    "role_id": "ROLE-001",
-    "source_name": "Amulet of Protection",
-    "canonical_name": "Amulet of Protection",
-    "entity_type": "Artifact",
-    "category": "Artifact",
-    "team": "Special",
-    "seer_result": "Villager",
-    "description_en": "The holder of the Amulet cannot be eliminated. (You must give the amulet to another player the next night?)",
-    "role_points": 4,
-    "balance_weight": 0,
-    "active_phase": "Night",
-    "action_type": "Protect",
-    "trigger": "Night action / pass to another player",
-    "target_type": "Self/Player",
-    "usage_limit": "Rule-dependent",
-    "information_level": "Public",
-    "night_priority": 20,
-    "can_change_role": false,
-    "reveal_on_death": "N/A",
-    "requires_engine_resolution": true,
-    "tooltip_en": "The holder of the Amulet cannot be eliminated. (You must give the amulet to another player the next night?)"
-  },
-  {
     "role_id": "ROLE-002",
     "source_name": "Alexander/Kimb/Blockchain (Vanity2,1)",
     "canonical_name": "Alexander / Kimb / Blockchain",
@@ -43,7 +20,9 @@
     "can_change_role": true,
     "reveal_on_death": "Rule-dependent",
     "requires_engine_resolution": true,
-    "tooltip_en": "You aren't on anyone's team until one side is about to lose, and then you join that side. You only win if you haven't been eliminated at the end of the game. (She switches teams when a team is about to lose so if the last werewolf dies she becomes a werewolf immediately, or if the werewolves achieve parity she becomes a villager. Basically prolongs the game a little bit longer. And she wins reagardless of her team winning as long as she's alive.\n\nAlso Ted plays that the village doesn't all die the game just ends. It's the only way to make Kimb work properly and Tom Vasel for that matter.)"
+    "tooltip_en": "You aren't on anyone's team until one side is about to lose, and then you join that side. You only win if you haven't been eliminated at the end of the game. (She switches teams when a team is about to lose so if the last werewolf dies she becomes a werewolf immediately, or if the werewolves achieve parity she becomes a villager. Basically prolongs the game a little bit longer. And she wins reagardless of her team winning as long as she's alive.\n\nAlso Ted plays that the village doesn't all die the game just ends. It's the only way to make Kimb work properly and Tom Vasel for that matter.)",
+    "description_id": "Kamu tidak berada di tim mana pun sampai salah satu tim hampir kalah, lalu kamu bergabung dengan tim tersebut. Kamu hanya menang jika belum dieliminasi di akhir permainan.",
+    "tooltip_id": "Kamu tidak berada di tim mana pun sampai salah satu tim hampir kalah, lalu kamu bergabung dengan tim tersebut. Kamu hanya menang jika belum dieliminasi di akhir permainan."
   },
   {
     "role_id": "ROLE-003",
@@ -66,30 +45,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Once per game following the elimination of a Werewolf during the day, you may turn the Werewolves target into a Werewolf instead of eliminating him."
-  },
-  {
-    "role_id": "ROLE-004",
-    "source_name": "Blockchain/Alexander/Kimb (Narcissist?)",
-    "canonical_name": "Alexander / Kimb / Blockchain",
-    "entity_type": "Role",
-    "category": "Neutral",
-    "team": "Dynamic Neutral",
-    "seer_result": "Villager",
-    "description_en": "You aren't on anyone's team until one side is about to lose, and then you join that side. You only win if you haven't been eliminated at the end of the game. (She switches teams when a team is about to lose so if the last werewolf dies she becomes a werewolf immediately, or if the werewolves achieve parity she becomes a villager. Basically prolongs the game a little bit longer. And she wins reagardless of her team winning as long as she's alive.\n\nAlso Ted plays that the village doesn't all die the game just ends. It's the only way to make Kimb work properly and Tom Vasel for that matter.)",
-    "role_points": 5,
-    "balance_weight": 0,
-    "active_phase": "Triggered",
-    "action_type": "Switch Team",
-    "trigger": "When one side is about to lose",
-    "target_type": "Self",
-    "usage_limit": "Passive",
-    "information_level": "Private",
-    "night_priority": 90,
-    "can_change_role": true,
-    "reveal_on_death": "Rule-dependent",
-    "requires_engine_resolution": true,
-    "tooltip_en": "You aren't on anyone's team until one side is about to lose, and then you join that side. You only win if you haven't been eliminated at the end of the game. (She switches teams when a team is about to lose so if the last werewolf dies she becomes a werewolf immediately, or if the werewolves achieve parity she becomes a villager. Basically prolongs the game a little bit longer. And she wins reagardless of her team winning as long as she's alive.\n\nAlso Ted plays that the village doesn't all die the game just ends. It's the only way to make Kimb work properly and Tom Vasel for that matter.)"
+    "tooltip_en": "Once per game following the elimination of a Werewolf during the day, you may turn the Werewolves target into a Werewolf instead of eliminating him.",
+    "description_id": "Satu kali per permainan setelah seorang Werewolf dieliminasi pada siang hari, kamu dapat mengubah target Werewolf menjadi Werewolf alih-alih mengeliminasinya.",
+    "tooltip_id": "Satu kali per permainan setelah seorang Werewolf dieliminasi pada siang hari, kamu dapat mengubah target Werewolf menjadi Werewolf alih-alih mengeliminasinya."
   },
   {
     "role_id": "ROLE-005",
@@ -112,7 +70,9 @@
     "can_change_role": true,
     "reveal_on_death": "Rule-dependent",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night, wake up and steal a card from another player. You are now that role."
+    "tooltip_en": "The first night, wake up and steal a card from another player. You are now that role.",
+    "description_id": "Pada malam pertama, bangun dan curi kartu dari pemain lain. Kamu sekarang menjadi role tersebut.",
+    "tooltip_id": "Pada malam pertama, bangun dan curi kartu dari pemain lain. Kamu sekarang menjadi role tersebut."
   },
   {
     "role_id": "ROLE-006",
@@ -135,7 +95,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If you are eliminated, the players immediately to your left and right are eliminated as well."
+    "tooltip_en": "If you are eliminated, the players immediately to your left and right are eliminated as well.",
+    "description_id": "Jika kamu dieliminasi, pemain di sebelah kiri dan kananmu akan ikut dieliminasi.",
+    "tooltip_id": "Jika kamu dieliminasi, pemain di sebelah kiri dan kananmu akan ikut dieliminasi."
   },
   {
     "role_id": "ROLE-007",
@@ -158,7 +120,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If time runs out three times during a game, Father Time wins."
+    "tooltip_en": "If time runs out three times during a game, Father Time wins.",
+    "description_id": "Jika waktu habis tiga kali selama permainan, Father Time menang.",
+    "tooltip_id": "Jika waktu habis tiga kali selama permainan, Father Time menang."
   },
   {
     "role_id": "ROLE-008",
@@ -181,7 +145,9 @@
     "can_change_role": true,
     "reveal_on_death": "Rule-dependent",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night, wake up and reveal a card from another player. You are now that role."
+    "tooltip_en": "The first night, wake up and reveal a card from another player. You are now that role.",
+    "description_id": "Pada malam pertama, bangun dan lihat kartu dari pemain lain. Jika kamu mau, tukar kartumu dengan kartu mereka.",
+    "tooltip_id": "Pada malam pertama, bangun dan lihat kartu dari pemain lain. Jika kamu mau, tukar kartumu dengan kartu mereka."
   },
   {
     "role_id": "ROLE-009",
@@ -204,7 +170,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "You may eliminate a player at night once per game."
+    "tooltip_en": "You may eliminate a player at night once per game.",
+    "description_id": "Kamu dapat mengeliminasi seorang pemain di malam hari sekali per permainan.",
+    "tooltip_id": "Kamu dapat mengeliminasi seorang pemain di malam hari sekali per permainan."
   },
   {
     "role_id": "ROLE-010",
@@ -227,30 +195,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the other Werewolves. The first night, choose a player and learn if that player is the Seer."
-  },
-  {
-    "role_id": "ROLE-011",
-    "source_name": "Kimb/Alexander/Blockchain (Vanity1,2)",
-    "canonical_name": "Alexander / Kimb / Blockchain",
-    "entity_type": "Role",
-    "category": "Neutral",
-    "team": "Dynamic Neutral",
-    "seer_result": "Villager",
-    "description_en": "You aren't on anyone's team until one side is about to lose, and then you join that side. You only win if you haven't been eliminated at the end of the game. (She switches teams when a team is about to lose so if the last werewolf dies she becomes a werewolf immediately, or if the werewolves achieve parity she becomes a villager. Basically prolongs the game a little bit longer. And she wins reagardless of her team winning as long as she's alive.\n\nAlso Ted plays that the village doesn't all die the game just ends. It's the only way to make Kimb work properly and Tom Vasel for that matter.)",
-    "role_points": 5,
-    "balance_weight": 0,
-    "active_phase": "Triggered",
-    "action_type": "Switch Team",
-    "trigger": "When one side is about to lose",
-    "target_type": "Self",
-    "usage_limit": "Passive",
-    "information_level": "Private",
-    "night_priority": 90,
-    "can_change_role": true,
-    "reveal_on_death": "Rule-dependent",
-    "requires_engine_resolution": true,
-    "tooltip_en": "You aren't on anyone's team until one side is about to lose, and then you join that side. You only win if you haven't been eliminated at the end of the game. (She switches teams when a team is about to lose so if the last werewolf dies she becomes a werewolf immediately, or if the werewolves achieve parity she becomes a villager. Basically prolongs the game a little bit longer. And she wins reagardless of her team winning as long as she's alive.\n\nAlso Ted plays that the village doesn't all die the game just ends. It's the only way to make Kimb work properly and Tom Vasel for that matter.)"
+    "tooltip_en": "Each night, wake with the other Werewolves. The first night, choose a player and learn if that player is the Seer.",
+    "description_id": "Bangun dengan para Werewolf. Setiap malam, selidiki satu pemain untuk mengetahui apakah dia Seer.",
+    "tooltip_id": "Bangun dengan para Werewolf. Setiap malam, selidiki satu pemain untuk mengetahui apakah dia Seer."
   },
   {
     "role_id": "ROLE-012",
@@ -273,7 +220,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The Magician gets to use a different nighttime power each night. Here's how it works: Before the game, the Moderator puts several nighttime-active roles in a pile (while he may reveal those roles to the players, it's better if he doesn't), and then each night, including the first night, he shows one of those cards to the magician, who may then use that special power. If he shows the Magician the Seer (this can happen because all you Kickstarter backers have at least one extra Seer), the Magician points to a player and learns if he is a werewolf. If he's shown the Insomniac, he'll be told if a player on either side of him woke up that night. If he's shown the Leprechaun, he can retarget who the werewolves selected. It's a fun, dynamic and exciting role that can really help the village!"
+    "tooltip_en": "The Magician gets to use a different nighttime power each night. Here's how it works: Before the game, the Moderator puts several nighttime-active roles in a pile (while he may reveal those roles to the players, it's better if he doesn't), and then each night, including the first night, he shows one of those cards to the magician, who may then use that special power. If he shows the Magician the Seer (this can happen because all you Kickstarter backers have at least one extra Seer), the Magician points to a player and learns if he is a werewolf. If he's shown the Insomniac, he'll be told if a player on either side of him woke up that night. If he's shown the Leprechaun, he can retarget who the werewolves selected. It's a fun, dynamic and exciting role that can really help the village!",
+    "description_id": "Satu kali per permainan di malam hari, pilih kekuatan khusus dari role yang sudah mati.",
+    "tooltip_id": "Satu kali per permainan di malam hari, pilih kekuatan khusus dari role yang sudah mati."
   },
   {
     "role_id": "ROLE-013",
@@ -296,7 +245,9 @@
     "can_change_role": false,
     "reveal_on_death": "Rule-dependent",
     "requires_engine_resolution": true,
-    "tooltip_en": "Cannot read."
+    "tooltip_en": "Cannot read.",
+    "description_id": "Setiap hari, kamu dapat menebak role seseorang. Jika tebakanmu benar, kamu mendapatkan kekuatan mereka.",
+    "tooltip_id": "Setiap hari, kamu dapat menebak role seseorang. Jika tebakanmu benar, kamu mendapatkan kekuatan mereka."
   },
   {
     "role_id": "ROLE-014",
@@ -319,7 +270,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If you have not been eliminated by the end of the game, you are the only one who wins."
+    "tooltip_en": "If you have not been eliminated by the end of the game, you are the only one who wins.",
+    "description_id": "Jika kamu belum dieliminasi di akhir permainan, kamu adalah satu-satunya pemenang.",
+    "tooltip_id": "Jika kamu belum dieliminasi di akhir permainan, kamu adalah satu-satunya pemenang."
   },
   {
     "role_id": "ROLE-015",
@@ -342,7 +295,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake up with the other Werewolves. If time runs out before a vote takes place, you must vote for players to not be eliminated."
+    "tooltip_en": "Each night, wake up with the other Werewolves. If time runs out before a vote takes place, you must vote for players to not be eliminated.",
+    "description_id": "Pada siang hari, paksa pemungutan suara seketika pada pemain yang kamu tunjuk.",
+    "tooltip_id": "Pada siang hari, paksa pemungutan suara seketika pada pemain yang kamu tunjuk."
   },
   {
     "role_id": "ROLE-016",
@@ -365,7 +320,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night you may point to a player. If that player is a Werewolf he is eliminated. If he isn't, you are eliminated instead."
+    "tooltip_en": "Each night you may point to a player. If that player is a Werewolf he is eliminated. If he isn't, you are eliminated instead.",
+    "description_id": "Setiap malam, tunjuk seorang pemain dan tebak rolenya. Jika benar, dia dieliminasi; jika salah, kamu dieliminasi.",
+    "tooltip_id": "Setiap malam, tunjuk seorang pemain dan tebak rolenya. Jika benar, dia dieliminasi; jika salah, kamu dieliminasi."
   },
   {
     "role_id": "ROLE-017",
@@ -388,30 +345,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If time runs out before a vote takes place, you must vote for players to not be eliminated."
-  },
-  {
-    "role_id": "ROLE-018",
-    "source_name": "Teria/Jacole",
-    "canonical_name": "Teria / Jacole",
-    "entity_type": "Role",
-    "category": "Werewolf",
-    "team": "Werewolf",
-    "seer_result": "Werewolf",
-    "description_en": "Each night, wake with the other Werewolves. The first night, choose a player and learn if that player is the Seer.",
-    "role_points": 4,
-    "balance_weight": -4,
-    "active_phase": "Night",
-    "action_type": "Werewolf + Investigate",
-    "trigger": "Night; special first-night info",
-    "target_type": "Player",
-    "usage_limit": "Passive/First-night",
-    "information_level": "Private",
-    "night_priority": 10,
-    "can_change_role": false,
-    "reveal_on_death": "Yes",
-    "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the other Werewolves. The first night, choose a player and learn if that player is the Seer."
+    "tooltip_en": "If time runs out before a vote takes place, you must vote for players to not be eliminated.",
+    "description_id": "Satu kali per permainan, batalkan proses eliminasi voting pada siang hari.",
+    "tooltip_id": "Satu kali per permainan, batalkan proses eliminasi voting pada siang hari."
   },
   {
     "role_id": "ROLE-019",
@@ -434,53 +370,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If you are eliminated, each day lasts only 1 minute."
-  },
-  {
-    "role_id": "ROLE-020",
-    "source_name": "Tom Vasel/Mo T. Le-Sav",
-    "canonical_name": "Mo T. Le'Sav / Tom Vasel",
-    "entity_type": "Role",
-    "category": "Neutral",
-    "team": "Solo",
-    "seer_result": "Villager",
-    "description_en": "If you have not been eliminated by the end of the game, you are the only one who wins.",
-    "role_points": 5,
-    "balance_weight": 0,
-    "active_phase": "Passive",
-    "action_type": "Survive",
-    "trigger": "End game",
-    "target_type": "Self",
-    "usage_limit": "Passive",
-    "information_level": "Private",
-    "night_priority": 100,
-    "can_change_role": false,
-    "reveal_on_death": "Yes",
-    "requires_engine_resolution": true,
-    "tooltip_en": "If you have not been eliminated by the end of the game, you are the only one who wins."
-  },
-  {
-    "role_id": "ROLE-021",
-    "source_name": "Blank Cards",
-    "canonical_name": "Blank Cards",
-    "entity_type": "Utility",
-    "category": "Custom",
-    "team": "Custom",
-    "seer_result": "Villager",
-    "description_en": "Create your own card or replacement!",
-    "role_points": 0,
-    "balance_weight": 0,
-    "active_phase": "Custom",
-    "action_type": "Custom",
-    "trigger": "Moderator-defined",
-    "target_type": "Varies",
-    "usage_limit": "Custom",
-    "information_level": "Moderator",
-    "night_priority": 100,
-    "can_change_role": true,
-    "reveal_on_death": "Custom",
-    "requires_engine_resolution": true,
-    "tooltip_en": "Create your own card or replacement!"
+    "tooltip_en": "If you are eliminated, each day lasts only 1 minute.",
+    "description_id": "Jika kamu dieliminasi, setiap fase siang hanya berlangsung selama 1 menit.",
+    "tooltip_id": "Jika kamu dieliminasi, setiap fase siang hanya berlangsung selama 1 menit."
   },
   {
     "role_id": "ROLE-022",
@@ -503,7 +395,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, the Seer investigates one player and receives a result according to the game's Seer rules."
+    "tooltip_en": "Each night, the Seer investigates one player and receives a result according to the game's Seer rules.",
+    "description_id": "Setiap malam, Seer menyelidiki satu pemain dan menerima informasi apakah pemain tersebut Werewolf atau Villager sesuai aturan permainan.",
+    "tooltip_id": "Setiap malam, Seer menyelidiki satu pemain dan menerima informasi apakah pemain tersebut Werewolf atau Villager sesuai aturan permainan."
   },
   {
     "role_id": "ROLE-023",
@@ -526,7 +420,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "At night, Werewolves secretly choose a player to eliminate. During the day, they hide their identity and mislead the village."
+    "tooltip_en": "At night, Werewolves secretly choose a player to eliminate. During the day, they hide their identity and mislead the village.",
+    "description_id": "Pada malam hari, para Werewolf diam-diam memilih seorang pemain untuk dieliminasi. Pada siang hari, sembunyikan identitas dan kelabui warga desa.",
+    "tooltip_id": "Pada malam hari, para Werewolf diam-diam memilih seorang pemain untuk dieliminasi. Pada siang hari, sembunyikan identitas dan kelabui warga desa."
   },
   {
     "role_id": "ROLE-024",
@@ -549,7 +445,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village member with no special ability. Use discussion, deduction, and voting to find the Werewolves."
+    "tooltip_en": "A Village member with no special ability. Use discussion, deduction, and voting to find the Werewolves.",
+    "description_id": "Anggota desa biasa tanpa kemampuan malam khusus. Gunakan diskusi, penalaran deduktif, dan voting siang untuk menemukan dan mengeliminasi para Werewolf.",
+    "tooltip_id": "Anggota desa biasa tanpa kemampuan malam khusus. Gunakan diskusi, penalaran deduktif, dan voting siang untuk menemukan dan mengeliminasi para Werewolf."
   },
   {
     "role_id": "ROLE-025",
@@ -572,7 +470,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, choose a player. That player is eliminated when a player gets their 3rd accusation the next day."
+    "tooltip_en": "Each night, choose a player. That player is eliminated when a player gets their 3rd accusation the next day.",
+    "description_id": "Setiap malam, pilih seorang pemain. Pemain tersebut akan dieliminasi jika mendapat tuduhan ke-3 pada siang hari berikutnya.",
+    "tooltip_id": "Setiap malam, pilih seorang pemain. Pemain tersebut akan dieliminasi jika mendapat tuduhan ke-3 pada siang hari berikutnya."
   },
   {
     "role_id": "ROLE-026",
@@ -595,7 +495,9 @@
     "can_change_role": true,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role that can become the Seer when the original Seer dies."
+    "tooltip_en": "A Village role that can become the Seer when the original Seer dies.",
+    "description_id": "Role desa yang akan mewarisi kemampuan dan menjadi Seer jika Seer asli telah mati.",
+    "tooltip_id": "Role desa yang akan mewarisi kemampuan dan menjadi Seer jika Seer asli telah mati."
   },
   {
     "role_id": "ROLE-027",
@@ -618,7 +520,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Choose a player each night to see if that player is not a Werewolf or Villager."
+    "tooltip_en": "Choose a player each night to see if that player is not a Werewolf or Villager.",
+    "description_id": "Setiap malam, selidiki seorang pemain untuk melihat apakah pemain tersebut memiliki peran khusus (bukan Werewolf biasa dan bukan Villager biasa).",
+    "tooltip_id": "Setiap malam, selidiki seorang pemain untuk melihat apakah pemain tersebut memiliki peran khusus (bukan Werewolf biasa dan bukan Villager biasa)."
   },
   {
     "role_id": "ROLE-028",
@@ -641,7 +545,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, the Bodyguard chooses a player to protect. The exact protection effect follows the ruleset."
+    "tooltip_en": "Each night, the Bodyguard chooses a player to protect. The exact protection effect follows the ruleset.",
+    "description_id": "Setiap malam, Bodyguard memilih seorang pemain untuk dilindungi dari serangan Werewolf. Bodyguard tidak dapat melindungi dirinya sendiri.",
+    "tooltip_id": "Setiap malam, Bodyguard memilih seorang pemain untuk dilindungi dari serangan Werewolf. Bodyguard tidak dapat melindungi dirinya sendiri."
   },
   {
     "role_id": "ROLE-029",
@@ -664,7 +570,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, choose a player to join your cult. If all players are in your cult, you win."
+    "tooltip_en": "Each night, choose a player to join your cult. If all players are in your cult, you win.",
+    "description_id": "Setiap malam, pilih seorang pemain untuk bergabung dengan kultusmu. Jika semua pemain yang hidup berhasil masuk kultus, kamu menang.",
+    "tooltip_id": "Setiap malam, pilih seorang pemain untuk bergabung dengan kultusmu. Jika semua pemain yang hidup berhasil masuk kultus, kamu menang."
   },
   {
     "role_id": "ROLE-030",
@@ -687,7 +595,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "On the first night, Cupid chooses two players to become linked. Their special relationship follows the ruleset."
+    "tooltip_en": "On the first night, Cupid chooses two players to become linked. Their special relationship follows the ruleset.",
+    "description_id": "Pada malam pertama, Cupid memilih dua pemain untuk saling jatuh cinta. Jika salah satu mati, pasangannya akan ikut mati karena patah hati.",
+    "tooltip_id": "Pada malam pertama, Cupid memilih dua pemain untuk saling jatuh cinta. Jika salah satu mati, pasangannya akan ikut mati karena patah hati."
   },
   {
     "role_id": "ROLE-031",
@@ -710,7 +620,9 @@
     "can_change_role": true,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Starts aligned with the Village and may change allegiance after a Werewolf attack, depending on the ruleset."
+    "tooltip_en": "Starts aligned with the Village and may change allegiance after a Werewolf attack, depending on the ruleset.",
+    "description_id": "Awalnya berpihak pada desa (Village). Namun jika diserang oleh Werewolf di malam hari, kamu tidak mati melainkan berubah menjadi Werewolf.",
+    "tooltip_id": "Awalnya berpihak pada desa (Village). Namun jika diserang oleh Werewolf di malam hari, kamu tidak mati melainkan berubah menjadi Werewolf."
   },
   {
     "role_id": "ROLE-032",
@@ -733,7 +645,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If you are eliminated by the Werewolves, they don't get to eliminate anyone the following night."
+    "tooltip_en": "If you are eliminated by the Werewolves, they don't get to eliminate anyone the following night.",
+    "description_id": "Jika kamu dieliminasi oleh Werewolf pada malam hari, Werewolf terinfeksi penyakit dan tidak dapat membunuh siapa pun pada malam berikutnya.",
+    "tooltip_id": "Jika kamu dieliminasi oleh Werewolf pada malam hari, Werewolf terinfeksi penyakit dan tidak dapat membunuh siapa pun pada malam berikutnya."
   },
   {
     "role_id": "ROLE-033",
@@ -756,7 +670,9 @@
     "can_change_role": true,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "On the first night, the Doppelganger chooses a player to copy. When that copied player dies, the Doppelganger takes on the copied role."
+    "tooltip_en": "On the first night, the Doppelganger chooses a player to copy. When that copied player dies, the Doppelganger takes on the copied role.",
+    "description_id": "Pada malam pertama, pilih seorang pemain untuk disalin. Ketika pemain tersebut mati, kamu mengambil alih role dan kemampuannya.",
+    "tooltip_id": "Pada malam pertama, pilih seorang pemain untuk disalin. Ketika pemain tersebut mati, kamu mengambil alih role dan kemampuannya."
   },
   {
     "role_id": "ROLE-034",
@@ -779,7 +695,9 @@
     "can_change_role": true,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A special role whose true identity or ability changes or becomes known at a specified point in the game."
+    "tooltip_en": "A special role whose true identity or ability changes or becomes known at a specified point in the game.",
+    "description_id": "Kamu mengira kamu adalah Villager biasa, tetapi pada malam ke-3 kamu sadar dan moderator memberi tahu role aslimu.",
+    "tooltip_id": "Kamu mengira kamu adalah Villager biasa, tetapi pada malam ke-3 kamu sadar dan moderator memberi tahu role aslimu."
   },
   {
     "role_id": "ROLE-035",
@@ -802,7 +720,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night, you are eliminated. Communicate to the players with single letter clues."
+    "tooltip_en": "The first night, you are eliminated. Communicate to the players with single letter clues.",
+    "description_id": "Pada malam pertama kamu langsung mati. Setelah itu, kamu dapat berkomunikasi dengan pemain yang hidup hanya menggunakan petunjuk satu huruf per hari.",
+    "tooltip_id": "Pada malam pertama kamu langsung mati. Setelah itu, kamu dapat berkomunikasi dengan pemain yang hidup hanya menggunakan petunjuk satu huruf per hari."
   },
   {
     "role_id": "ROLE-036",
@@ -825,30 +745,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Choose 2 players on the first night. They must die and you must be alive at the end of the game. (to win)"
-  },
-  {
-    "role_id": "ROLE-037",
-    "source_name": "Moderator",
-    "canonical_name": "Moderator",
-    "entity_type": "Utility",
-    "category": "Moderator",
-    "team": "Moderator",
-    "seer_result": "Villager",
-    "description_en": "You are the Moderator.",
-    "role_points": 0,
-    "balance_weight": 0,
-    "active_phase": "Always",
-    "action_type": "Moderate",
-    "trigger": "Always",
-    "target_type": "Game",
-    "usage_limit": "N/A",
-    "information_level": "Moderator",
-    "night_priority": 99,
-    "can_change_role": false,
-    "reveal_on_death": "N/A",
-    "requires_engine_resolution": true,
-    "tooltip_en": "You are the Moderator."
+    "tooltip_en": "Choose 2 players on the first night. They must die and you must be alive at the end of the game. (to win)",
+    "description_id": "Pilih 2 pemain pada malam pertama. Kamu menang jika kedua pemain tersebut mati dan kamu tetap hidup di akhir permainan.",
+    "tooltip_id": "Pilih 2 pemain pada malam pertama. Kamu menang jika kedua pemain tersebut mati dan kamu tetap hidup di akhir permainan."
   },
   {
     "role_id": "ROLE-038",
@@ -871,7 +770,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "One night per game, choose a player to be protected. That player may not be eliminated at night."
+    "tooltip_en": "One night per game, choose a player to be protected. That player may not be eliminated at night.",
+    "description_id": "Satu kali per permainan di malam hari, pilih seorang pemain untuk diberkati perlindungan suci sehingga tidak bisa dibunuh malam itu.",
+    "tooltip_id": "Satu kali per permainan di malam hari, pilih seorang pemain untuk diberkati perlindungan suci sehingga tidak bisa dibunuh malam itu."
   },
   {
     "role_id": "ROLE-039",
@@ -894,7 +795,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The Hunter has no normal night action. If eliminated by village voting, the Hunter may choose another player to take down."
+    "tooltip_en": "The Hunter has no normal night action. If eliminated by village voting, the Hunter may choose another player to take down.",
+    "description_id": "Hunter tidak memiliki aksi malam biasa. Namun jika dieliminasi melalui voting warga pada siang hari, Hunter dapat menembak dan membawa satu pemain lain bersamanya.",
+    "tooltip_id": "Hunter tidak memiliki aksi malam biasa. Namun jika dieliminasi melalui voting warga pada siang hari, Hunter dapat menembak dan membawa satu pemain lain bersamanya."
   },
   {
     "role_id": "ROLE-040",
@@ -917,7 +820,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the other Werewolves. You only win if you are the last player in the game."
+    "tooltip_en": "Each night, wake with the other Werewolves. You only win if you are the last player in the game.",
+    "description_id": "Bangun setiap malam bersama Werewolf lain. Kamu hanya menang sendirian jika menjadi pemain terakhir yang bertahan hidup di akhir permainan.",
+    "tooltip_id": "Bangun setiap malam bersama Werewolf lain. Kamu hanya menang sendirian jika menjadi pemain terakhir yang bertahan hidup di akhir permainan."
   },
   {
     "role_id": "ROLE-041",
@@ -940,7 +845,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village-aligned role that appears as a Werewolf to the Seer."
+    "tooltip_en": "A Village-aligned role that appears as a Werewolf to the Seer.",
+    "description_id": "Anggota tim Village yang setia, namun karena kutukan bulunya, Seer akan melihatmu sebagai Werewolf saat diselidiki.",
+    "tooltip_id": "Anggota tim Village yang setia, namun karena kutukan bulunya, Seer akan melihatmu sebagai Werewolf saat diselidiki."
   },
   {
     "role_id": "ROLE-042",
@@ -963,7 +870,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Once per game, you may choose to be eliminated instead of the player who was eliminated during the day (before the role is revealed)."
+    "tooltip_en": "Once per game, you may choose to be eliminated instead of the player who was eliminated during the day (before the role is revealed).",
+    "description_id": "Satu kali per permainan, kamu dapat mengorbankan diri untuk menggantikan pemain yang divote keluar pada siang hari.",
+    "tooltip_id": "Satu kali per permainan, kamu dapat mengorbankan diri untuk menggantikan pemain yang divote keluar pada siang hari."
   },
   {
     "role_id": "ROLE-043",
@@ -986,7 +895,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Masons recognize other Mason players, usually from the first night."
+    "tooltip_en": "Masons recognize other Mason players, usually from the first night.",
+    "description_id": "Pada malam pertama, para Mason saling bangun dan mengetahui siapa saja sesama rekan Mason yang ada di desa.",
+    "tooltip_id": "Pada malam pertama, para Mason saling bangun dan mengetahui siapa saja sesama rekan Mason yang ada di desa."
   },
   {
     "role_id": "ROLE-044",
@@ -1009,7 +920,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role with special influence over voting. The exact voting effect depends on the ruleset."
+    "tooltip_en": "A Village role with special influence over voting. The exact voting effect depends on the ruleset.",
+    "description_id": "Suara voting Mayor bernilai ganda (2 suara) saat penentuan eliminasi siang hari.",
+    "tooltip_id": "Suara voting Mayor bernilai ganda (2 suara) saat penentuan eliminasi siang hari."
   },
   {
     "role_id": "ROLE-045",
@@ -1032,7 +945,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Werewolf-aligned role that supports the Werewolves. Its exact abilities depend on the ruleset."
+    "tooltip_en": "A Werewolf-aligned role that supports the Werewolves. Its exact abilities depend on the ruleset.",
+    "description_id": "Berpihak pada Werewolf dan mengetahui siapa saja Werewolf di desa, namun Werewolf tidak tahu siapa Minion. Dilihat sebagai Villager oleh Seer.",
+    "tooltip_id": "Berpihak pada Werewolf dan mengetahui siapa saja Werewolf di desa, namun Werewolf tidak tahu siapa Minion. Dilihat sebagai Villager oleh Seer."
   },
   {
     "role_id": "ROLE-046",
@@ -1055,7 +970,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "At night, the Old Hag can remove a player from the following day's participation, according to the ruleset."
+    "tooltip_en": "At night, the Old Hag can remove a player from the following day's participation, according to the ruleset.",
+    "description_id": "Setiap malam, pilih seorang pemain. Pemain tersebut dikutuk dan harus meninggalkan desa sehingga tidak boleh berbicara atau ikut voting keesokan harinya.",
+    "tooltip_id": "Setiap malam, pilih seorang pemain. Pemain tersebut dikutuk dan harus meninggalkan desa sehingga tidak boleh berbicara atau ikut voting keesokan harinya."
   },
   {
     "role_id": "ROLE-047",
@@ -1078,7 +995,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role with a special timed-death condition."
+    "tooltip_en": "A Village role with a special timed-death condition.",
+    "description_id": "Akan mati secara otomatis karena usia tua pada malam ke-X (jumlah malam sesuai jumlah Werewolf di awal permainan + 1).",
+    "tooltip_id": "Akan mati secara otomatis karena usia tua pada malam ke-X (jumlah malam sesuai jumlah Werewolf di awal permainan + 1)."
   },
   {
     "role_id": "ROLE-048",
@@ -1101,7 +1020,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role whose ability can prevent or alter an elimination by vote."
+    "tooltip_en": "A Village role whose ability can prevent or alter an elimination by vote.",
+    "description_id": "Pecinta damai. Jika kamu divote untuk dieliminasi, kamu mengungkap role-mu dan eliminasi hari itu dibatalkan.",
+    "tooltip_id": "Pecinta damai. Jika kamu divote untuk dieliminasi, kamu mengungkap role-mu dan eliminasi hari itu dibatalkan."
   },
   {
     "role_id": "ROLE-049",
@@ -1124,7 +1045,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "One night per game, choose a player. You'll be told if that player or one of his neighbors is a Werewolf."
+    "tooltip_en": "One night per game, choose a player. You'll be told if that player or one of his neighbors is a Werewolf.",
+    "description_id": "Satu kali per permainan, selidiki seorang pemain. Moderator memberi tahu apakah pemain tersebut atau salah satu tetangga sebelahnya adalah Werewolf.",
+    "tooltip_id": "Satu kali per permainan, selidiki seorang pemain. Moderator memberi tahu apakah pemain tersebut atau salah satu tetangga sebelahnya adalah Werewolf."
   },
   {
     "role_id": "ROLE-050",
@@ -1147,7 +1070,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role that can survive a specific type of vote-based elimination."
+    "tooltip_en": "A Village role that can survive a specific type of vote-based elimination.",
+    "description_id": "Pangeran desa. Jika divote keluar pada siang hari, Prince mengungkap identitasnya dan tidak bisa dieliminasi oleh voting tersebut.",
+    "tooltip_id": "Pangeran desa. Jika divote keluar pada siang hari, Prince mengungkap identitasnya dan tidak bisa dieliminasi oleh voting tersebut."
   },
   {
     "role_id": "ROLE-051",
@@ -1170,7 +1095,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Werewolf-aligned special role that helps the Werewolves through information or investigation abilities."
+    "tooltip_en": "A Werewolf-aligned special role that helps the Werewolves through information or investigation abilities.",
+    "description_id": "Penyihir jahat sekutu Werewolf. Setiap malam menyelidiki satu pemain untuk mencari tahu apakah pemain tersebut adalah Seer.",
+    "tooltip_id": "Penyihir jahat sekutu Werewolf. Setiap malam menyelidiki satu pemain untuk mencari tahu apakah pemain tersebut adalah Seer."
   },
   {
     "role_id": "ROLE-052",
@@ -1193,7 +1120,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, choose a player who may not speak the following day."
+    "tooltip_en": "Each night, choose a player who may not speak the following day.",
+    "description_id": "Setiap malam, pilih seorang pemain. Pemain tersebut terkena sihir bisu dan dilarang berbicara sepatah kata pun sepanjang siang berikutnya.",
+    "tooltip_id": "Setiap malam, pilih seorang pemain. Pemain tersebut terkena sihir bisu dan dilarang berbicara sepatah kata pun sepanjang siang berikutnya."
   },
   {
     "role_id": "ROLE-053",
@@ -1216,7 +1145,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A neutral role whose goal is to be eliminated by the village. If the required condition is met, the Tanner wins."
+    "tooltip_en": "A neutral role whose goal is to be eliminated by the village. If the required condition is met, the Tanner wins.",
+    "description_id": "Role netral yang sangat ingin mati. Jika Tanner berhasil dieliminasi melalui voting warga desa pada siang hari, Tanner langsung menang sendiri!",
+    "tooltip_id": "Role netral yang sangat ingin mati. Jika Tanner berhasil dieliminasi melalui voting warga desa pada siang hari, Tanner langsung menang sendiri!"
   },
   {
     "role_id": "ROLE-054",
@@ -1239,7 +1170,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role that can survive or delay the effect of a Werewolf attack."
+    "tooltip_en": "A Village role that can survive or delay the effect of a Werewolf attack.",
+    "description_id": "Pria tangguh. Jika diserang oleh Werewolf di malam hari, kamu tidak langsung mati malam itu, melainkan baru gugur pada malam berikutnya.",
+    "tooltip_id": "Pria tangguh. Jika diserang oleh Werewolf di malam hari, kamu tidak langsung mati malam itu, melainkan baru gugur pada malam berikutnya."
   },
   {
     "role_id": "ROLE-055",
@@ -1262,7 +1195,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role with a special ability that interferes with another player's status or the voting process."
+    "tooltip_en": "A Village role with a special ability that interferes with another player's status or the voting process.",
+    "description_id": "Setiap malam, buat onar dengan memaksa desa agar wajib mengeliminasi seseorang pada siang berikutnya (tidak boleh skip vote).",
+    "tooltip_id": "Setiap malam, buat onar dengan memaksa desa agar wajib mengeliminasi seseorang pada siang berikutnya (tidak boleh skip vote)."
   },
   {
     "role_id": "ROLE-056",
@@ -1285,7 +1220,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A Village role with a special voting behavior that can affect how votes are resolved."
+    "tooltip_en": "A Village role with a special voting behavior that can affect how votes are resolved.",
+    "description_id": "Selalu memilih untuk mengeliminasi seseorang saat voting. Jika divote keluar, role terungkap dan kamu kehilangan hak suara.",
+    "tooltip_id": "Selalu memilih untuk mengeliminasi seseorang saat voting. Jika divote keluar, role terungkap dan kamu kehilangan hak suara."
   },
   {
     "role_id": "ROLE-057",
@@ -1308,7 +1245,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "A role with special potions that may save a player and/or eliminate a player, depending on the ruleset."
+    "tooltip_en": "A role with special potions that may save a player and/or eliminate a player, depending on the ruleset.",
+    "description_id": "Memiliki 2 ramuan: Ramuan Penyembuh (menyelamatkan korban serangan Werewolf) dan Ramuan Racun (mengeliminasi 1 pemain pilihan di malam hari).",
+    "tooltip_id": "Memiliki 2 ramuan: Ramuan Penyembuh (menyelamatkan korban serangan Werewolf) dan Ramuan Racun (mengeliminasi 1 pemain pilihan di malam hari)."
   },
   {
     "role_id": "ROLE-058",
@@ -1331,7 +1270,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the Werewolves. If you are eliminated, the Werewolves eliminate two players the following night."
+    "tooltip_en": "Each night, wake with the Werewolves. If you are eliminated, the Werewolves eliminate two players the following night.",
+    "description_id": "Anak serigala. Jika Wolf Cub dieliminasi, para Werewolf akan mengamuk dan boleh mengeliminasi dua pemain pada malam berikutnya.",
+    "tooltip_id": "Anak serigala. Jika Wolf Cub dieliminasi, para Werewolf akan mengamuk dan boleh mengeliminasi dua pemain pada malam berikutnya."
   },
   {
     "role_id": "ROLE-059",
@@ -1354,7 +1295,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the other Werewolves. If you are still in the game, the Werewolves may eliminate two adjacent players."
+    "tooltip_en": "Each night, wake with the other Werewolves. If you are still in the game, the Werewolves may eliminate two adjacent players.",
+    "description_id": "Selama Big Bad Wolf masih hidup, Werewolf dapat mengeliminasi dua pemain yang duduk bersebelahan setiap malam.",
+    "tooltip_id": "Selama Big Bad Wolf masih hidup, Werewolf dapat mengeliminasi dua pemain yang duduk bersebelahan setiap malam."
   },
   {
     "role_id": "ROLE-060",
@@ -1377,7 +1320,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the other Werewolves. The first night, choose a player to be your companion. You are eliminated if that player is eliminated."
+    "tooltip_en": "Each night, wake with the other Werewolves. The first night, choose a player to be your companion. You are eliminated if that player is eliminated.",
+    "description_id": "Bangun bersama Werewolf. Pada malam pertama, pilih seorang pemain sebagai sahabat karibmu. Jika dia mati, kamu ikut mati seketika.",
+    "tooltip_id": "Bangun bersama Werewolf. Pada malam pertama, pilih seorang pemain sebagai sahabat karibmu. Jika dia mati, kamu ikut mati seketika."
   },
   {
     "role_id": "ROLE-061",
@@ -1400,7 +1345,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night, wake with the other Werewolves. While there are other Werewolves in the game, do not wake up with them on subsequent nights."
+    "tooltip_en": "The first night, wake with the other Werewolves. While there are other Werewolves in the game, do not wake up with them on subsequent nights.",
+    "description_id": "Pada malam pertama bangun bersama Werewolf. Setelah itu, tidak bangun lagi bersama Werewolf selama masih ada Werewolf lain yang hidup.",
+    "tooltip_id": "Pada malam pertama bangun bersama Werewolf. Setelah itu, tidak bangun lagi bersama Werewolf selama masih ada Werewolf lain yang hidup."
   },
   {
     "role_id": "ROLE-062",
@@ -1423,7 +1370,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the other Werewolves. If you are the last Werewolf in the game, you do not get to eliminate a player at night."
+    "tooltip_en": "Each night, wake with the other Werewolves. If you are the last Werewolf in the game, you do not get to eliminate a player at night.",
+    "description_id": "Bangun bersama Werewolf. Namun jika kamu menjadi Werewolf terakhir yang tersisa, kamu tidak bisa mengeliminasi pemain di malam hari.",
+    "tooltip_id": "Bangun bersama Werewolf. Namun jika kamu menjadi Werewolf terakhir yang tersisa, kamu tidak bisa mengeliminasi pemain di malam hari."
   },
   {
     "role_id": "ROLE-063",
@@ -1446,7 +1395,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night, choose a player to be afraid of you. If you are eliminated, that player is also eliminated."
+    "tooltip_en": "The first night, choose a player to be afraid of you. If you are eliminated, that player is also eliminated.",
+    "description_id": "Pada malam pertama, pilih seorang pemain yang takut padamu. Jika kamu dieliminasi, pemain tersebut juga akan ikut dieliminasi.",
+    "tooltip_id": "Pada malam pertama, pilih seorang pemain yang takut padamu. Jika kamu dieliminasi, pemain tersebut juga akan ikut dieliminasi."
   },
   {
     "role_id": "ROLE-064",
@@ -1469,7 +1420,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, wake with the other Werewolves. If you are the closest Werewolf to the target, the players hear a metallic sound."
+    "tooltip_en": "Each night, wake with the other Werewolves. If you are the closest Werewolf to the target, the players hear a metallic sound.",
+    "description_id": "Bangun bersama Werewolf. Jika kamu adalah Werewolf terdekat dengan target eliminasi, terdengar suara gesekan logam di malam hari.",
+    "tooltip_id": "Bangun bersama Werewolf. Jika kamu adalah Werewolf terdekat dengan target eliminasi, terdengar suara gesekan logam di malam hari."
   },
   {
     "role_id": "ROLE-065",
@@ -1492,7 +1445,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, pick a player to be a wife. If you make it through a day/night cycle with 3 wives, you win."
+    "tooltip_en": "Each night, pick a player to be a wife. If you make it through a day/night cycle with 3 wives, you win.",
+    "description_id": "Setiap malam, pilih seorang pemain untuk dijadikan istri. Jika berhasil bertahan satu siklus siang/malam dengan 3 istri hidup, kamu menang!",
+    "tooltip_id": "Setiap malam, pilih seorang pemain untuk dijadikan istri. Jika berhasil bertahan satu siklus siang/malam dengan 3 istri hidup, kamu menang!"
   },
   {
     "role_id": "ROLE-066",
@@ -1515,7 +1470,9 @@
     "can_change_role": true,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Whenever a special character dies, you get their power"
+    "tooltip_en": "Whenever a special character dies, you get their power",
+    "description_id": "Setiap kali ada karakter dengan peran khusus yang mati, kamu menyerap dan mendapatkan kekuatan khusus mereka.",
+    "tooltip_id": "Setiap kali ada karakter dengan peran khusus yang mati, kamu menyerap dan mendapatkan kekuatan khusus mereka."
   },
   {
     "role_id": "ROLE-067",
@@ -1538,7 +1495,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Wake with the other werewolves. You must say \"werewolf\" at least once per day."
+    "tooltip_en": "Wake with the other werewolves. You must say \"werewolf\" at least once per day.",
+    "description_id": "Bangun bersama Werewolf setiap malam. Kamu wajib mengucapkan kata 'werewolf' setidaknya satu kali setiap fase siang.",
+    "tooltip_id": "Bangun bersama Werewolf setiap malam. Kamu wajib mengucapkan kata 'werewolf' setidaknya satu kali setiap fase siang."
   },
   {
     "role_id": "ROLE-068",
@@ -1561,7 +1520,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, the player to the right of The Blob is absorbed. If all players are part of The Blob, you win."
+    "tooltip_en": "Each night, the player to the right of The Blob is absorbed. If all players are part of The Blob, you win.",
+    "description_id": "Setiap malam, pemain yang duduk di sebelah kanan The Blob akan diserap. Jika semua pemain terserap ke dalam The Blob, kamu menang!",
+    "tooltip_id": "Setiap malam, pemain yang duduk di sebelah kanan The Blob akan diserap. Jika semua pemain terserap ke dalam The Blob, kamu menang!"
   },
   {
     "role_id": "ROLE-069",
@@ -1584,7 +1545,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, pick a player to be hypnotized. That player will vote the way you do."
+    "tooltip_en": "Each night, pick a player to be hypnotized. That player will vote the way you do.",
+    "description_id": "Setiap malam, pilih seorang pemain untuk dihipnotis. Pemain tersebut wajib mengikuti pilihan votingmu pada siang hari berikutnya.",
+    "tooltip_id": "Setiap malam, pilih seorang pemain untuk dihipnotis. Pemain tersebut wajib mengikuti pilihan votingmu pada siang hari berikutnya."
   },
   {
     "role_id": "ROLE-070",
@@ -1607,7 +1570,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, pick a player and eat their brains. That player may no longer vote."
+    "tooltip_en": "Each night, pick a player and eat their brains. That player may no longer vote.",
+    "description_id": "Setiap malam, pilih seorang pemain dan makan otaknya. Pemain tersebut kehilangan kemampuan untuk memberikan suara (vote).",
+    "tooltip_id": "Setiap malam, pilih seorang pemain dan makan otaknya. Pemain tersebut kehilangan kemampuan untuk memberikan suara (vote)."
   },
   {
     "role_id": "ROLE-071",
@@ -1630,7 +1595,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night learn who the Seer is."
+    "tooltip_en": "The first night learn who the Seer is.",
+    "description_id": "Pada malam pertama, Beholder membuka mata dan mengetahui siapa pemain yang menjadi Seer di desa.",
+    "tooltip_id": "Pada malam pertama, Beholder membuka mata dan mengetahui siapa pemain yang menjadi Seer di desa."
   },
   {
     "role_id": "ROLE-072",
@@ -1653,7 +1620,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If the Werewolves don't agree on a target quickly, you choose a target. You win if all the night-active players are dead."
+    "tooltip_en": "If the Werewolves don't agree on a target quickly, you choose a target. You win if all the night-active players are dead.",
+    "description_id": "Jika Werewolf tidak segera menyepakati target di malam hari, Bogeyman yang menentukan targetnya. Menang jika semua role beraksi malam mati.",
+    "tooltip_id": "Jika Werewolf tidak segera menyepakati target di malam hari, Bogeyman yang menentukan targetnya. Menang jika semua role beraksi malam mati."
   },
   {
     "role_id": "ROLE-073",
@@ -1676,7 +1645,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "You don't wake at night with the other Werewolves until after a Werewolf is killed."
+    "tooltip_en": "You don't wake at night with the other Werewolves until after a Werewolf is killed.",
+    "description_id": "Werewolf yang tertidur. Kamu tidak bangun bersama Werewolf lain di malam hari sampai ada satu Werewolf yang mati tereliminasi.",
+    "tooltip_id": "Werewolf yang tertidur. Kamu tidak bangun bersama Werewolf lain di malam hari sampai ada satu Werewolf yang mati tereliminasi."
   },
   {
     "role_id": "ROLE-074",
@@ -1699,7 +1670,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, learn if at least one of your neighbors has woken up during the night."
+    "tooltip_en": "Each night, learn if at least one of your neighbors has woken up during the night.",
+    "description_id": "Penderita insomnia. Setiap malam, kamu mengetahui apakah salah satu tetangga yang duduk di sebelahmu bangun selama malam hari.",
+    "tooltip_id": "Penderita insomnia. Setiap malam, kamu mengetahui apakah salah satu tetangga yang duduk di sebelahmu bangun selama malam hari."
   },
   {
     "role_id": "ROLE-075",
@@ -1722,7 +1695,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night you are told how many Werewolves are in each half of the village."
+    "tooltip_en": "The first night you are told how many Werewolves are in each half of the village.",
+    "description_id": "Pada malam pertama, The Count diberi tahu berapa jumlah Werewolf yang berada di sisi kiri dan sisi kanan desa.",
+    "tooltip_id": "Pada malam pertama, The Count diberi tahu berapa jumlah Werewolf yang berada di sisi kiri dan sisi kanan desa."
   },
   {
     "role_id": "ROLE-076",
@@ -1745,7 +1720,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, tap a player sitting immediately next to you."
+    "tooltip_en": "Each night, tap a player sitting immediately next to you.",
+    "description_id": "Setiap malam, tepuk pundak pemain yang duduk tepat di sebelahmu untuk memberi tanda rahasia.",
+    "tooltip_id": "Setiap malam, tepuk pundak pemain yang duduk tepat di sebelahmu untuk memberi tanda rahasia."
   },
   {
     "role_id": "ROLE-077",
@@ -1768,7 +1745,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "If you die, each night kill either a Villager if you were lynched or a Werewolf if you were attacked."
+    "tooltip_en": "If you die, each night kill either a Villager if you were lynched or a Werewolf if you were attacked.",
+    "description_id": "Jika kamu mati digantung warga, setiap malam kamu membunuh satu Villager. Jika kamu mati diserang Werewolf, setiap malam kamu membunuh satu Werewolf.",
+    "tooltip_id": "Jika kamu mati digantung warga, setiap malam kamu membunuh satu Villager. Jika kamu mati diserang Werewolf, setiap malam kamu membunuh satu Werewolf."
   },
   {
     "role_id": "ROLE-078",
@@ -1791,7 +1770,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "An independent role with its own objective. In the current binary Seer model, it is treated as Villager unless the ruleset says otherwise."
+    "tooltip_en": "An independent role with its own objective. In the current binary Seer model, it is treated as Villager unless the ruleset says otherwise.",
+    "description_id": "Setiap malam berburu Werewolf. Dalam penyelidikan Seer, Chupacabra terdeteksi sebagai Villager kecuali aturan rumah menentukan lain.",
+    "tooltip_id": "Setiap malam berburu Werewolf. Dalam penyelidikan Seer, Chupacabra terdeteksi sebagai Villager kecuali aturan rumah menentukan lain."
   },
   {
     "role_id": "ROLE-079",
@@ -1814,7 +1795,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "Each night, you may redirect the werewolves' attack to a player sitting next to their target."
+    "tooltip_en": "Each night, you may redirect the werewolves' attack to a player sitting next to their target.",
+    "description_id": "Setiap malam, kamu dapat mengalihkan serangan Werewolf ke pemain yang duduk tepat di sebelah target asli.",
+    "tooltip_id": "Setiap malam, kamu dapat mengalihkan serangan Werewolf ke pemain yang duduk tepat di sebelah target asli."
   },
   {
     "role_id": "ROLE-080",
@@ -1837,7 +1820,9 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "The first night, predict which team will win. If you are alive at the end of the game and predicted accurately, you win."
+    "tooltip_en": "The first night, predict which team will win. If you are alive at the end of the game and predicted accurately, you win.",
+    "description_id": "Pada malam pertama, ramalkan tim mana yang akan menang. Jika kamu masih hidup di akhir permainan dan tebakanmu benar, kamu menang!",
+    "tooltip_id": "Pada malam pertama, ramalkan tim mana yang akan menang. Jika kamu masih hidup di akhir permainan dan tebakanmu benar, kamu menang!"
   },
   {
     "role_id": "ROLE-081",
@@ -1860,7 +1845,9 @@
     "can_change_role": true,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "You are on the villager team unless a day ends without a lynch. Then you switch teams to the werewolves."
+    "tooltip_en": "You are on the villager team unless a day ends without a lynch. Then you switch teams to the werewolves.",
+    "description_id": "Kamu berada di tim Villager, kecuali jika ada satu hari yang berakhir tanpa ada pemain yang divote gantung. Maka kamu berkhianat ke tim Werewolf!",
+    "tooltip_id": "Kamu berada di tim Villager, kecuali jika ada satu hari yang berakhir tanpa ada pemain yang divote gantung. Maka kamu berkhianat ke tim Werewolf!"
   },
   {
     "role_id": "ROLE-082",
@@ -1883,6 +1870,8 @@
     "can_change_role": false,
     "reveal_on_death": "Yes",
     "requires_engine_resolution": true,
-    "tooltip_en": "You wake with the other Werewolves each night, but the Seer sees you as a Villager."
+    "tooltip_en": "You wake with the other Werewolves each night, but the Seer sees you as a Villager.",
+    "description_id": "Bangun bersama para Werewolf setiap malam dan ikut membunuh, namun jika diselidiki oleh Seer, Seer akan melihatmu sebagai Villager biasa!",
+    "tooltip_id": "Bangun bersama para Werewolf setiap malam dan ikut membunuh, namun jika diselidiki oleh Seer, Seer akan melihatmu sebagai Villager biasa!"
   }
 ]

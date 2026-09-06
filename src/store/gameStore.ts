@@ -63,7 +63,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     set((state) => ({
       phase: "NIGHT",
       nightCount: 1,
-      nightActions: buildNightActions(state.players),
+      nightActions: buildNightActions(state.players, 1),
       currentNarrative: "🌙 Malam pertama telah tiba. Semua pemain menutup mata...",
       gameLog: [
         ...state.gameLog,
@@ -78,11 +78,20 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     })),
 
   setNightActionTarget: (actionId, targetId) =>
-    set((state) => ({
-      nightActions: state.nightActions.map((a) =>
-        a.id === actionId ? { ...a, target_player_id: targetId } : a
-      ),
-    })),
+    set((state) => {
+      const action = state.nightActions.find((a) => a.id === actionId);
+      // Bodyguard cannot protect self
+      if (action && action.role_name.toLowerCase().includes("bodyguard") && targetId) {
+        if (action.player_ids.includes(targetId)) {
+          return { ...state };
+        }
+      }
+      return {
+        nightActions: state.nightActions.map((a) =>
+          a.id === actionId ? { ...a, target_player_id: targetId } : a
+        ),
+      };
+    }),
 
   setNightActionTarget2: (actionId, targetId) =>
     set((state) => ({
@@ -212,7 +221,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     set((state) => ({
       phase: "NIGHT",
       nightCount: state.nightCount + 1,
-      nightActions: buildNightActions(state.players),
+      nightActions: buildNightActions(state.players, state.nightCount + 1),
       triggeredActions: [],
       activeTriggeredAction: null,
       currentNarrative: `🌙 Malam ke-${state.nightCount + 1} telah tiba...`,

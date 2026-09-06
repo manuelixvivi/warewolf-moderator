@@ -23,6 +23,12 @@ export function resolveNight(
   for (const action of sortedActions) {
     if (!action.completed || !action.target_player_id) continue;
     const targetId = action.target_player_id;
+    
+    // Bodyguard cannot protect self
+    if (action.role_name.toLowerCase().includes("bodyguard") && action.player_ids.includes(targetId)) {
+      continue;
+    }
+
     if (["Protect", "Protect/Heal", "Guard"].some(t => action.action_type.includes(t))) {
       const target = playerMap.get(targetId);
       if (target) {
@@ -52,7 +58,7 @@ export function resolveNight(
   for (const action of sortedActions) {
     if (!action.completed || !action.target_player_id) continue;
     const targetId = action.target_player_id;
-    if (["Investigate", "Check", "See"].some(t => action.action_type.includes(t))) {
+    if (["Investigate", "Check", "See", "Find Seer"].some(t => action.action_type.includes(t))) {
       const target = playerMap.get(targetId);
       if (target) {
         const seerResult = getSeerResult(target);
@@ -99,7 +105,7 @@ export function resolveNight(
   return { updatedPlayers: Array.from(playerMap.values()), result, triggered };
 }
 
-function getSeerResult(player: Player): "Werewolf" | "Villager" {
+export function getSeerResult(player: Player): "Werewolf" | "Villager" {
   if (player.seer_result === "Werewolf") return "Werewolf";
   return "Villager";
 }
@@ -156,18 +162,26 @@ export function checkWinCondition(players: Player[]): WinResult | null {
   return null;
 }
 
-export function buildNightActions(players: Player[]): NightAction[] {
+export function buildNightActions(players: Player[], nightCount: number = 1): NightAction[] {
   const alivePlayers = players.filter((p) => p.alive);
   const actions: NightAction[] = [];
   const roleGroups = new Map<string, Player[]>();
 
   for (const p of alivePlayers) {
-    const phase = p.active_phase || "";
-    const isNightActive =
-      phase.toLowerCase().includes("night") ||
-      phase.toLowerCase().includes("triggered");
+    const phase = (p.active_phase || "").toLowerCase();
+    
+    // Strictly requires "night" in active phase. Excludes "triggered", "passive", "none", "always".
+    if (!phase.includes("night")) continue;
 
-    if (!isNightActive || !p.action_type || p.action_type.toLowerCase() === "passive") continue;
+    // Roles that strictly act on Night 1 only do not wake on Night 2+
+    const isFirstNightOnly =
+      (phase.includes("night 1") || phase.includes("first night")) &&
+      !phase.includes("/ night");
+    if (nightCount > 1 && isFirstNightOnly) continue;
+
+    // Exclude passive, vote, or none action types
+    const actionType = (p.action_type || "").toLowerCase();
+    if (!actionType || actionType === "passive" || actionType === "none" || actionType === "vote") continue;
 
     if (!roleGroups.has(p.canonical_name)) {
       roleGroups.set(p.canonical_name, []);
@@ -178,7 +192,7 @@ export function buildNightActions(players: Player[]): NightAction[] {
   for (const [roleName, rolePlayers] of roleGroups) {
     const rep = rolePlayers[0];
     actions.push({
-      id: `action-${roleName}-${Date.now()}`,
+      id: `action-${roleName}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       role_id: rep.role_id,
       role_name: roleName,
       player_ids: rolePlayers.map((p) => p.id),

@@ -25,6 +25,8 @@ export interface RoleData {
   reveal_on_death: string;
   requires_engine_resolution: boolean;
   tooltip_en: string;
+  description_id?: string;
+  tooltip_id?: string;
 }
 
 export interface SelectedRole {
@@ -60,6 +62,8 @@ export interface Player {
   night_priority: number;
   can_change_role: boolean;
   tooltip_en: string;
+  description_id?: string;
+  tooltip_id?: string;
 }
 
 export interface NightAction {
