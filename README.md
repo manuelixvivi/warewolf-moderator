@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+﻿# 🐺 Werewolf Moderator
 
-## Getting Started
+Alat bantu berbasis web untuk moderator permainan **Werewolf** (Ultimate Werewolf) — dilengkapi narasi AI dan game engine otomatis.
 
-First, run the development server:
+## ✨ Fitur
+
+- **🎭 Setup Permainan** — Pilih role, tentukan jumlah pemain, masukkan nama langsung per role
+- **🌙 Night Dashboard** — Semua aksi malam tampil sekaligus (tidak wizard step-by-step)
+- **☀️ Day Dashboard** — Narasi otomatis, voting eliminasi, ungkap role
+- **? Tooltips** — Setiap role punya tombol `?` dengan deskripsi lengkap (EN)
+- **⚡ Game Engine** — Resolusi malam otomatis (kill, protect, investigate)
+- **🏹 Triggered Actions** — Hunter, Doppelganger, Wolf Cub ditangani dengan modal
+- **📋 82 Role** — Database lengkap dari Werewolf: Ultimate Edition
+
+## 🚀 Deploy
+
+Aplikasi ini di-deploy di [Vercel](https://vercel.com). Setelah push ke GitHub, sambungkan repo ke Vercel.
+
+## 🛠 Tech Stack
+
+- **Next.js 16** (App Router)
+- **TypeScript**
+- **Tailwind CSS v4**
+- **Zustand** (state management)
+
+## 📦 Instalasi Lokal
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Buka [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🎮 Cara Main
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Setup** — Masukkan nama game, pilih tema & gaya narasi, pilih role + jumlah
+2. **Nama Pemain** — Input nama untuk setiap role yang dipilih
+3. **Malam** — Selesaikan semua aksi malam, klik "Selesaikan Malam"
+4. **Siang** — Baca narasi, lakukan voting eliminasi, mulai malam berikutnya
+5. **Game Over** — Kondisi menang otomatis terdeteksi
 
-## Learn More
+## 📁 Struktur Proyek
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+  app/           # Next.js App Router
+  components/
+    setup/       # GameSetupScreen, PlayerNameInput
+    game/        # NightDashboard, DayDashboard, dll.
+    ui/          # RoleCard, Tooltip
+  data/
+    roles.json   # 82 role database
+  lib/
+    gameEngine.ts # Game logic
+  store/
+    gameStore.ts  # Zustand state
+  types/
+    game.ts       # TypeScript types
+```
