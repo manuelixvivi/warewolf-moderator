@@ -20,8 +20,26 @@ export default function LobbyScreen() {
   const hasMinPlayers = joinedCount >= 5;
   const isExactFull = joinedCount === targetCount;
 
-  // Mode 1 requires exact count match. Mode 2 & Mode 3 can start whenever joinedCount >= 5
-  const canStart = gameMode === "MODE_1_FIXED" ? (isExactFull && hasMinPlayers) : hasMinPlayers;
+  // Check if Mode 2 pool has wolf-side role
+  const poolRoles = room?.selectedRoles || [];
+  const poolHasWolf = poolRoles.some((sr) => {
+    const r = ALL_ROLES.find((x) => x.role_id === sr.role_id);
+    return (
+      r?.team === "Werewolf" ||
+      r?.team === "Solo Werewolf" ||
+      r?.team === "Werewolf-aligned"
+    );
+  });
+
+  // Mode 1 requires exact count match.
+  // Mode 2 requires at least 5 players AND at least 1 wolf in pool.
+  // Mode 3 requires at least 5 players.
+  const canStart =
+    gameMode === "MODE_1_FIXED"
+      ? isExactFull && hasMinPlayers
+      : gameMode === "MODE_2_POOL"
+      ? hasMinPlayers && poolHasWolf
+      : hasMinPlayers;
 
   const handleCopyCode = () => {
     if (!room?.code) return;
@@ -246,6 +264,8 @@ export default function LobbyScreen() {
                     ? `START GAME (${joinedCount} PEMAIN)`
                     : joinedCount < 5
                     ? `Menunggu Minimal 5 Pemain (${joinedCount}/5)`
+                    : gameMode === "MODE_2_POOL" && !poolHasWolf
+                    ? "Pool Wajib Memiliki Peran Serigala!"
                     : `Menunggu Room Penuh (${joinedCount}/${targetCount})`}
                 </span>
               </button>
@@ -254,6 +274,8 @@ export default function LobbyScreen() {
                 <p className="text-center text-xs text-yellow-400 font-medium">
                   {joinedCount < 5
                     ? "⚠️ Game ASPIRE: WEREWOLF memerlukan minimal 5 pemain untuk menjaga keseimbangan permainan."
+                    : gameMode === "MODE_2_POOL" && !poolHasWolf
+                    ? "⚠️ Role pool tidak memiliki peran di pihak Werewolf. Host tidak dapat memulai game tanpa serigala!"
                     : `⚠️ Mode 1 memerlukan semua ${targetCount} kursi terisi sebelum bisa dimulai.`}
                 </p>
               )}

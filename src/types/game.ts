@@ -156,6 +156,7 @@ export interface NetworkMessage {
     | "PLAYER_LEFT"
     | "TOGGLE_READY"
     | "START_GAME"
+    | "ASSIGN_PRIVATE_ROLE"
     | "SUBMIT_NIGHT_ACTION"
     | "SUBMIT_VOTE"
     | "TRIGGERED_ACTION"
@@ -163,6 +164,7 @@ export interface NetworkMessage {
     | "SEND_CHAT";
   senderId: string;
   senderName?: string;
+  recipientId?: string;
   payload?: any;
 }
 

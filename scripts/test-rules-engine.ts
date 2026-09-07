@@ -106,7 +106,7 @@ console.log("============================================================\n");
   const deathChain = resolveDeathChain(updatedPlayers, outcome.killedPlayerIds, "WEREWOLF");
 
   const bob = deathChain.updatedPlayers.find((p) => p.id === "p2");
-  const hunterTriggered = deathChain.pendingTriggeredActions.some((t) => t.type === "HUNTER");
+  const hunterTriggered = (deathChain.pendingTriggeredActions || []).some((t: any) => t.type === "HUNTER");
 
   assert(
     bob?.alive === false && !hunterTriggered,

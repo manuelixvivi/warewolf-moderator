@@ -37,9 +37,6 @@ export default function CreateRoomScreen() {
     "ROLE-024": 4, // 4 Villagers (Total 8 players)
   });
 
-  // Mode 3 target count
-  const [mode3Count, setMode3Count] = useState(8);
-
   const [filterCategory, setFilterCategory] = useState("Semua");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,10 +72,26 @@ export default function CreateRoomScreen() {
   }, [filterCategory, searchQuery]);
 
   const handleIncrement = (role_id: string) => {
+    if (gameMode === "MODE_2_POOL") {
+      // In Mode 2, toggle presence in pool (1 or 0)
+      setSelectedMap((prev) => ({
+        ...prev,
+        [role_id]: prev[role_id] ? 0 : 1,
+      }));
+      return;
+    }
     setSelectedMap((prev) => ({ ...prev, [role_id]: (prev[role_id] || 0) + 1 }));
   };
 
   const handleDecrement = (role_id: string) => {
+    if (gameMode === "MODE_2_POOL") {
+      setSelectedMap((prev) => {
+        const updated = { ...prev, [role_id]: 0 };
+        delete updated[role_id];
+        return updated;
+      });
+      return;
+    }
     setSelectedMap((prev) => {
       const newCount = Math.max(0, (prev[role_id] || 0) - 1);
       const updated = { ...prev, [role_id]: newCount };
@@ -88,28 +101,36 @@ export default function CreateRoomScreen() {
   };
 
   const hasWerewolf = Object.keys(selectedMap).some((id) => {
+    if (!selectedMap[id]) return false;
     const role = ALL_ROLES.find((r) => r.role_id === id);
-    return role && (role.team === "Werewolf" || role.category === "Werewolf");
+    return (
+      role &&
+      (role.team === "Werewolf" ||
+        role.team === "Solo Werewolf" ||
+        role.team === "Werewolf-aligned" ||
+        role.category === "Werewolf")
+    );
   });
 
   // Expand selected roles for balance calculation
   const expandedSelectedRoles = useMemo(() => {
     if (gameMode === "MODE_3_RANDOM") {
       try {
-        return generateBalancedRandomComposition(mode3Count);
+        return generateBalancedRandomComposition(8);
       } catch {
         return [];
       }
     }
     const list: RoleData[] = [];
     for (const [id, count] of Object.entries(selectedMap)) {
+      if (!count) continue;
       const role = ALL_ROLES.find((r) => r.role_id === id);
       if (role) {
         for (let i = 0; i < count; i++) list.push(role);
       }
     }
     return list;
-  }, [gameMode, selectedMap, mode3Count]);
+  }, [gameMode, selectedMap]);
 
   // Balance metrics
   const balanceMetrics = useMemo(() => {
@@ -120,10 +141,13 @@ export default function CreateRoomScreen() {
   const canCreate = useMemo(() => {
     if (!hostName.trim()) return false;
     if (gameMode === "MODE_3_RANDOM") {
-      return mode3Count >= MINIMUM_PLAYERS;
+      return true; // Open room, dynamically balanced when started in lobby
+    }
+    if (gameMode === "MODE_2_POOL") {
+      return totalSelectedRoles >= 2 && hasWerewolf;
     }
     return totalSelectedRoles >= MINIMUM_PLAYERS && hasWerewolf;
-  }, [hostName, gameMode, mode3Count, totalSelectedRoles, hasWerewolf]);
+  }, [hostName, gameMode, totalSelectedRoles, hasWerewolf]);
 
   const handleCreateRoom = async () => {
     if (!canCreate || isSubmitting) return;
@@ -132,21 +156,18 @@ export default function CreateRoomScreen() {
     let selectedRoles: SelectedRole[] = [];
 
     if (gameMode === "MODE_3_RANDOM") {
-      const generated = generateBalancedRandomComposition(mode3Count);
-      const map: Record<string, number> = {};
-      for (const r of generated) {
-        map[r.role_id] = (map[r.role_id] || 0) + 1;
-      }
-      selectedRoles = Object.entries(map).map(([role_id, count]) => {
-        const roleData = ALL_ROLES.find((r) => r.role_id === role_id)!;
-        return { role_id, canonical_name: roleData.canonical_name, count };
-      });
+      // Mode 3 has dynamic composition generated upon start for actual players count
+      selectedRoles = [];
     } else {
       selectedRoles = Object.entries(selectedMap)
         .filter(([, count]) => count > 0)
         .map(([role_id, count]) => {
           const roleData = ALL_ROLES.find((r) => r.role_id === role_id)!;
-          return { role_id, canonical_name: roleData.canonical_name, count };
+          return {
+            role_id,
+            canonical_name: roleData.canonical_name,
+            count: gameMode === "MODE_2_POOL" ? 1 : count,
+          };
         });
     }
 
@@ -156,7 +177,7 @@ export default function CreateRoomScreen() {
         selectedRoles,
         theme,
         gameMode,
-        gameMode === "MODE_3_RANDOM" ? mode3Count : totalSelectedRoles
+        gameMode === "MODE_1_FIXED" ? totalSelectedRoles : 0
       );
     } catch (err) {
       console.error(err);
@@ -193,12 +214,14 @@ export default function CreateRoomScreen() {
                 ? "Target Pemain"
                 : gameMode === "MODE_2_POOL"
                 ? "Role di Pool"
-                : "Target Otomatis"}
+                : "Kapasitas"}
             </div>
             <div className="text-3xl font-black text-white">
-              {gameMode === "MODE_3_RANDOM" ? mode3Count : totalSelectedRoles}
+              {gameMode === "MODE_3_RANDOM" ? "5+" : totalSelectedRoles}
             </div>
-            <div className="text-[11px] text-gray-400">orang</div>
+            <div className="text-[11px] text-gray-400">
+              {gameMode === "MODE_3_RANDOM" ? "pemain bebas" : gameMode === "MODE_2_POOL" ? "peran diizinkan" : "pemain"}
+            </div>
           </div>
         </div>
       </div>
@@ -343,64 +366,50 @@ export default function CreateRoomScreen() {
           </p>
         </div>
 
-        {/* Mode 3 Settings: Player Count Slider & Role Preview */}
+        {/* Mode 3 Settings: Open Room Info */}
         {gameMode === "MODE_3_RANDOM" && (
-          <div className="bg-gray-900/90 rounded-2xl border border-purple-900/50 p-5 shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="bg-gray-900/90 rounded-2xl border border-purple-800/60 p-6 shadow-xl space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">🎲</span>
               <div>
-                <h3 className="text-base font-bold text-white">Target Jumlah Pemain</h3>
-                <p className="text-xs text-gray-400">
-                  Engine akan otomatis membagi dan menyeimbangkan peran untuk jumlah pemain ini.
+                <h3 className="text-base font-bold text-white">Mode 3: Open Random Room</h3>
+                <p className="text-xs text-purple-300">
+                  Komposisi Seimbang Dinamis Berbasis AI & Rules Engine
                 </p>
               </div>
-              <div className="text-2xl font-black text-purple-300 px-4 py-1 bg-purple-950 rounded-xl border border-purple-600">
-                {mode3Count} Pemain
-              </div>
             </div>
-
-            <input
-              type="range"
-              min={5}
-              max={25}
-              value={mode3Count}
-              onChange={(e) => setMode3Count(parseInt(e.target.value))}
-              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-            />
-
-            <div className="pt-2">
-              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                Pratinjau Komposisi Otomatis:
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {expandedSelectedRoles.map((r, i) => (
-                  <span
-                    key={`${r.role_id}-${i}`}
-                    className="px-2.5 py-1 rounded-lg bg-gray-800 border border-gray-700 text-xs text-gray-200"
-                  >
-                    {r.canonical_name}
-                  </span>
-                ))}
-              </div>
-            </div>
+            <p className="text-xs text-gray-300 leading-relaxed">
+              Tidak perlu mengatur slider jumlah pemain di awal. Cukup buat room dan bagikan kode ke teman-temanmu. Siapa saja dapat bergabung (minimal 5 orang). Saat host menekan <strong>Start Game</strong> di Lobby, engine secara otomatis menyusun komposisi peran paling seimbang dari 75 database role sesuai jumlah pemain yang hadir.
+            </p>
           </div>
         )}
 
-        {/* Mode 1 & 2: Manual Role Selection */}
+        {/* Mode 1 & 2: Role Selection */}
         {gameMode !== "MODE_3_RANDOM" && (
           <div className="bg-gray-900/90 rounded-2xl border border-gray-700/80 p-5 shadow-xl space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <span>🎭</span> Pilih Komposisi Peran (75 Role Database)
+                  <span>🎭</span>{" "}
+                  {gameMode === "MODE_1_FIXED"
+                    ? "Pilih Komposisi Peran (75 Role Database)"
+                    : "Tentukan Role Pool yang Diizinkan"}
                 </h2>
                 <p className="text-xs text-gray-400">
                   {gameMode === "MODE_1_FIXED"
                     ? "Tentukan kartu yang akan dibagikan (jumlah wajib sama persis dengan pemain)."
-                    : "Pilih peran kandidat untuk pool (minimal 5 peran)."}
+                    : "Pilih peran yang diizinkan dalam pool (tanpa kuantitas). Engine akan memilih subset seimbang tanpa menambahkan kartu di luar pool."}
                 </p>
+                {gameMode === "MODE_2_POOL" && !hasWerewolf && (
+                  <p className="text-xs text-red-400 font-semibold mt-1">
+                    ⚠️ Pool wajib memiliki minimal 1 peran di pihak Werewolf!
+                  </p>
+                )}
               </div>
               <div className="text-xs px-3 py-1 rounded-full bg-purple-900/60 text-purple-300 font-semibold border border-purple-700/60">
-                Total: {totalSelectedRoles} Kartu
+                {gameMode === "MODE_1_FIXED"
+                  ? `Total: ${totalSelectedRoles} Kartu`
+                  : `Pool: ${totalSelectedRoles} Peran Diizinkan`}
               </div>
             </div>
 
@@ -477,7 +486,7 @@ export default function CreateRoomScreen() {
           <span>
             {isSubmitting
               ? "Membuat Room..."
-              : `BUAT ROOM (${gameMode === "MODE_3_RANDOM" ? mode3Count : totalSelectedRoles} PEMAIN)`}
+              : `BUAT ROOM (${gameMode === "MODE_3_RANDOM" ? "OPEN ROOM" : totalSelectedRoles + " PEMAIN"})`}
           </span>
         </button>
       </div>

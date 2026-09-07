@@ -34,6 +34,9 @@ class NetworkEngine {
   }
 
   private dispatchMessage(msg: NetworkMessage) {
+    if (msg.recipientId && msg.recipientId !== this.myPlayerId) {
+      return; // Dropped: Addressed to another player
+    }
     this.messageHandlers.forEach((handler) => {
       try {
         handler(msg);
@@ -142,7 +145,11 @@ class NetworkEngine {
           console.log(`Connected to WSS Broker [${brokerUrl}] for room: ${this.roomCode}`);
 
           if (this.topic && this.client) {
-            this.client.subscribe(this.topic, { qos: 1 }, (err) => {
+            const topicsToSub = [this.topic];
+            if (this.myPlayerId) {
+              topicsToSub.push(`${this.topic}/${this.myPlayerId}`);
+            }
+            this.client.subscribe(topicsToSub, { qos: 1 }, (err) => {
               if (err) console.warn("Subscribe error:", err);
               resolve();
             });
@@ -152,7 +159,10 @@ class NetworkEngine {
         });
 
         this.client.on("message", (recvTopic, payload) => {
-          if (recvTopic === this.topic) {
+          if (
+            recvTopic === this.topic ||
+            (this.myPlayerId && recvTopic === `${this.topic}/${this.myPlayerId}`)
+          ) {
             try {
               const msgStr = payload.toString();
               const msg = JSON.parse(msgStr) as NetworkMessage;
@@ -235,6 +245,33 @@ class NetworkEngine {
         this.broadcastChannel.postMessage(msg);
       } catch (err) {
         console.warn("Error posting to broadcast channel:", err);
+      }
+    }
+  }
+
+  // ── Send to Specific Player (Host to Player Private Delivery) ──
+  public sendToPlayer(recipientPlayerId: string, msg: NetworkMessage) {
+    const directMsg: NetworkMessage = {
+      ...msg,
+      recipientId: recipientPlayerId,
+    };
+    const raw = JSON.stringify(directMsg);
+
+    // 1. Send via Cloud WSS Broker on target player private sub-topic
+    if (this.client && this.client.connected && this.topic) {
+      try {
+        this.client.publish(`${this.topic}/${recipientPlayerId}`, raw, { qos: 1 });
+      } catch (err) {
+        console.warn("Error publishing private msg to MQTT:", err);
+      }
+    }
+
+    // 2. Mirror to BroadcastChannel (filtered by recipientId in dispatchMessage)
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage(directMsg);
+      } catch (err) {
+        console.warn("Error posting private msg to broadcast channel:", err);
       }
     }
   }

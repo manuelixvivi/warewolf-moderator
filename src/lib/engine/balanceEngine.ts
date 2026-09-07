@@ -1,6 +1,6 @@
 // ============================================================
 // ASPIRE: WEREWOLF - Balance Engine & Mode Allocators
-// Driven by Role Database Blueprint
+// Driven by Role Database Blueprint (75 Roles, 79 Abilities)
 // "One Village. Many Lies. One Wolf."
 // ============================================================
 
@@ -36,7 +36,7 @@ export function calculateCompositionBalance(roles: RoleData[]): CompositionBalan
     }
   }
 
-  // A composition is generally balanced if balance_weight is within [-3, +3]
+  // A composition is generally balanced if balance_weight is within [-4, +4]
   const isBalanced = Math.abs(totalBalanceWeight) <= 4;
   let recommendation = "Komposisi seimbang.";
   if (totalBalanceWeight > 4) {
@@ -85,134 +85,163 @@ export function validateMode1Fixed(
 }
 
 /**
- * Expands selected role array into a list of RoleData.
+ * Mode 2: Role Pool Validator
+ * Enforces:
+ * 1. Minimum 5 players
+ * 2. At least one wolf-side role in the pool
+ * 3. At least one village/other role in the pool
  */
-export function expandSelectedRoles(selectedRoles: SelectedRole[]): RoleData[] {
-  const list: RoleData[] = [];
-  for (const sr of selectedRoles) {
-    const data = ROLE_BY_ID.get(sr.role_id);
-    if (data) {
-      for (let i = 0; i < sr.count; i++) {
-        list.push(data);
-      }
-    }
+export function validateMode2Pool(
+  poolRoles: SelectedRole[],
+  playerCount: number
+): { valid: boolean; error?: string } {
+  if (playerCount < MINIMUM_PLAYERS) {
+    return {
+      valid: false,
+      error: `Minimal pemain adalah ${MINIMUM_PLAYERS} orang. Saat ini ada ${playerCount} pemain.`,
+    };
   }
-  return list;
+
+  const roleObjects = poolRoles
+    .map((sr) => ROLE_BY_ID.get(sr.role_id) || ALL_ROLES.find((r) => r.role_id === sr.role_id))
+    .filter(Boolean) as RoleData[];
+
+  if (roleObjects.length === 0) {
+    return {
+      valid: false,
+      error: "Pool peran kosong. Silakan tentukan peran yang diperbolehkan di pool.",
+    };
+  }
+
+  const hasWolfSide = roleObjects.some(
+    (r) =>
+      r.team === "Werewolf" ||
+      r.team === "Solo Werewolf" ||
+      r.team === "Werewolf-aligned"
+  );
+
+  if (!hasWolfSide) {
+    return {
+      valid: false,
+      error: "Role pool wajib memiliki minimal 1 peran di pihak Werewolf agar permainan dapat dimulai.",
+    };
+  }
+
+  return { valid: true };
 }
 
 /**
  * Mode 2: Role Pool Picker
- * Selects a balanced subset from the host's selected pool matching the exact player count.
+ * Selects a balanced subset strictly from the host's allowed pool.
+ * NO PADDING OUTSIDE POOL: Under no circumstance does this add roles not in the pool.
  */
 export function selectBalancedSubsetFromPool(
   poolRoles: SelectedRole[],
   playerCount: number
 ): RoleData[] {
-  if (playerCount < MINIMUM_PLAYERS) {
-    throw new Error(`Minimal ${MINIMUM_PLAYERS} pemain dibutuhkan.`);
+  const validation = validateMode2Pool(poolRoles, playerCount);
+  if (!validation.valid) {
+    throw new Error(validation.error || "Validasi Mode 2 gagal.");
   }
 
-  const expandedPool = expandSelectedRoles(poolRoles);
-  if (expandedPool.length < playerCount) {
-    // If pool is smaller than actual players, pad with Villagers
-    const villager = ALL_ROLES.find((r) => r.canonical_name === "Villager") || ALL_ROLES[0];
-    while (expandedPool.length < playerCount) {
-      expandedPool.push(villager);
-    }
-  }
+  // Extract unique role objects from pool
+  const allowedRoles = poolRoles
+    .map((sr) => ROLE_BY_ID.get(sr.role_id) || ALL_ROLES.find((r) => r.role_id === sr.role_id))
+    .filter(Boolean) as RoleData[];
 
-  // Desired werewolf count based on player count
+  const wolfCandidates = allowedRoles.filter(
+    (r) =>
+      r.team === "Werewolf" ||
+      r.team === "Solo Werewolf" ||
+      r.team === "Werewolf-aligned"
+  );
+  const otherCandidates = allowedRoles.filter(
+    (r) =>
+      r.team !== "Werewolf" &&
+      r.team !== "Solo Werewolf" &&
+      r.team !== "Werewolf-aligned"
+  );
+
+  // Target wolf count based on player count (~20-25%)
   const targetWolfCount = playerCount <= 6 ? 1 : playerCount <= 9 ? 2 : 3;
 
-  const wolfCandidates = expandedPool.filter(
-    (r) => r.team === "Werewolf" || r.team === "Solo Werewolf"
-  );
-  const otherCandidates = expandedPool.filter(
-    (r) => r.team !== "Werewolf" && r.team !== "Solo Werewolf"
-  );
+  const selectedRoles: RoleData[] = [];
 
-  const selectedWolves = wolfCandidates.slice(0, targetWolfCount);
-  // If pool lacked enough wolves, add standard Werewolf
-  const stdWerewolf = ALL_ROLES.find((r) => r.canonical_name === "Werewolf") || ALL_ROLES[1];
-  while (selectedWolves.length < targetWolfCount) {
-    selectedWolves.push(stdWerewolf);
+  // Pick wolves strictly from wolf pool candidates
+  for (let i = 0; i < targetWolfCount; i++) {
+    const wolf = wolfCandidates[i % wolfCandidates.length];
+    selectedRoles.push(wolf);
   }
 
-  const remainingNeeded = playerCount - selectedWolves.length;
-  const selectedOthers = otherCandidates.slice(0, remainingNeeded);
-  const stdVillager = ALL_ROLES.find((r) => r.canonical_name === "Villager") || ALL_ROLES[0];
-  while (selectedOthers.length < remainingNeeded) {
-    selectedOthers.push(stdVillager);
+  // Pick remaining roles strictly from other candidates (or pool if no other candidates)
+  const remainingNeeded = playerCount - selectedRoles.length;
+  const poolForRest = otherCandidates.length > 0 ? otherCandidates : allowedRoles;
+
+  for (let i = 0; i < remainingNeeded; i++) {
+    const candidate = poolForRest[i % poolForRest.length];
+    selectedRoles.push(candidate);
   }
 
-  return [...selectedWolves, ...selectedOthers];
+  return selectedRoles;
 }
 
 /**
- * Mode 3: Full Random / Open Room Balanced Generator
- * Automatically generates a balanced, compatible role set from scratch for any player count >= 5.
+ * Mode 3: Dynamic Full Random / Open Room Balanced Generator
+ * Generates a balanced, rich role set from all 75 roles for any player count >= 5.
  */
 export function generateBalancedRandomComposition(playerCount: number): RoleData[] {
   if (playerCount < MINIMUM_PLAYERS) {
     throw new Error(`Minimal ${MINIMUM_PLAYERS} pemain dibutuhkan.`);
   }
 
+  const getRole = (name: string): RoleData => {
+    const found = ALL_ROLES.find((r) => r.canonical_name.toLowerCase() === name.toLowerCase());
+    if (!found) {
+      return ALL_ROLES[0];
+    }
+    return found;
+  };
+
   const roles: RoleData[] = [];
-  const getRole = (name: string) =>
-    ALL_ROLES.find((r) => r.canonical_name.toLowerCase() === name.toLowerCase())!;
 
-  // 1. Werewolf core allocation
-  const stdWolf = getRole("Werewolf");
-  const wolfCub = getRole("Wolf Cub") || stdWolf;
-  const alphaWolf = getRole("Alpha Wolf") || stdWolf;
+  // 1. Werewolf allocation
+  const wolfRoles = [
+    getRole("Werewolf"),
+    getRole("Wolf Cub"),
+    getRole("Alpha Wolf"),
+    getRole("Dire Wolf"),
+    getRole("Big Bad Wolf"),
+    getRole("Wolf Man"),
+    getRole("Fruit Brute"),
+  ].filter(Boolean);
 
-  if (playerCount <= 6) {
-    // 5-6 players: 1 Werewolf
-    roles.push(stdWolf);
-  } else if (playerCount <= 8) {
-    // 7-8 players: 2 Werewolves
-    roles.push(stdWolf);
-    roles.push(wolfCub);
-  } else if (playerCount <= 11) {
-    // 9-11 players: 2-3 Werewolves
-    roles.push(stdWolf);
-    roles.push(alphaWolf);
-    roles.push(wolfCub);
-  } else {
-    // 12+ players: 3-4 Werewolves
-    roles.push(stdWolf);
-    roles.push(stdWolf);
-    roles.push(alphaWolf);
-    roles.push(wolfCub);
+  const targetWolves = playerCount <= 6 ? 1 : playerCount <= 9 ? 2 : playerCount <= 11 ? 3 : 4;
+  for (let i = 0; i < targetWolves; i++) {
+    roles.push(wolfRoles[i % wolfRoles.length]);
   }
 
-  // 2. Investigative role (Seer)
+  // 2. Core Village Investigation
   const seer = getRole("Seer");
   roles.push(seer);
 
-  // 3. Defensive role (Bodyguard / Doctor)
-  const bodyguard = getRole("Bodyguard");
-  roles.push(bodyguard);
-
-  // 4. Special Village / Neutral spice
+  // 3. Core Village Protection (only for 6+ players to keep small games balanced)
   if (playerCount >= 6) {
-    const hunter = getRole("Hunter");
-    roles.push(hunter);
+    const bodyguard = getRole("Bodyguard");
+    roles.push(bodyguard);
   }
 
+  // 4. Special Roles scaled to player count
   if (playerCount >= 7) {
-    const tanner = getRole("Tanner");
-    roles.push(tanner);
+    roles.push(getRole("Tanner"));
   }
-
   if (playerCount >= 9) {
-    const witch = getRole("Witch");
-    roles.push(witch);
+    roles.push(getRole("Hunter"));
   }
-
-  if (playerCount >= 10) {
-    const mayor = getRole("Mayor");
-    roles.push(mayor);
+  if (playerCount >= 11) {
+    roles.push(getRole("Witch"));
+  }
+  if (playerCount >= 13) {
+    roles.push(getRole("Mayor"));
   }
 
   // 5. Fill remaining slots with standard Villagers

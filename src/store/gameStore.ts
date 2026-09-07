@@ -284,11 +284,35 @@ export const useGameStore = create<GameStore>()((set, get) => {
 
       set(updatedState);
 
-      // Broadcast to all clients
+      // Secure private delivery to each client individually (Multiplayer Security P0)
+      for (const p of randomizedPlayers) {
+        if (p.id !== myPlayerId) {
+          network.sendToPlayer(p.id, {
+            type: "ASSIGN_PRIVATE_ROLE",
+            senderId: myPlayerId,
+            payload: { player: p },
+          });
+        }
+      }
+
+      // Sanitize players for public broadcast (masking secret roles)
+      const sanitizedPublicPlayers = randomizedPlayers.map((p) => ({
+        id: p.id,
+        name: p.name,
+        alive: p.alive,
+        isHost: p.isHost,
+        silenced: p.silenced,
+        isReady: false,
+      }));
+
+      // Broadcast to all clients with masked public players
       network.broadcast({
         type: "START_GAME",
         senderId: myPlayerId,
-        payload: updatedState,
+        payload: {
+          ...updatedState,
+          players: sanitizedPublicPlayers,
+        },
       });
 
       narratorVoice.speak("Kartu peran telah dibagikan secara rahasia. Buka kartumu dan bersiaplah.");
@@ -778,25 +802,79 @@ export const useGameStore = create<GameStore>()((set, get) => {
           break;
         }
 
+        case "ASSIGN_PRIVATE_ROLE": {
+          if (msg.payload && msg.payload.player) {
+            const privatePlayer = msg.payload.player;
+            set((state) => {
+              const updatedPlayers = state.players.map((p) =>
+                p.id === privatePlayer.id ? { ...p, ...privatePlayer } : p
+              );
+              return {
+                ...state,
+                players: updatedPlayers,
+              };
+            });
+          }
+          break;
+        }
+
         case "SYNC_STATE": {
           if (msg.payload) {
-            set((state) => ({
-              ...state,
-              ...msg.payload,
-              // Maintain local player identity
-              myPlayerId: state.myPlayerId,
-              myPlayerName: state.myPlayerName,
-            }));
+            const myId = get().myPlayerId;
+            const isHost = get().room?.hostId === myId;
+            set((state) => {
+              let mergedPlayers = msg.payload.players || state.players;
+              if (!isHost) {
+                // Keep local player's private role
+                const myLocal = state.players.find((p) => p.id === myId);
+                if (myLocal && myLocal.role_id) {
+                  mergedPlayers = mergedPlayers.map((p: any) =>
+                    p.id === myId
+                      ? {
+                          ...p,
+                          ...myLocal,
+                          alive: p.alive !== undefined ? p.alive : myLocal.alive,
+                          silenced: p.silenced !== undefined ? p.silenced : myLocal.silenced,
+                          isReady: p.isReady !== undefined ? p.isReady : myLocal.isReady,
+                        }
+                      : p
+                  );
+                }
+              }
+              return {
+                ...state,
+                ...msg.payload,
+                players: mergedPlayers,
+                myPlayerId: state.myPlayerId,
+                myPlayerName: state.myPlayerName,
+              };
+            });
           }
           break;
         }
 
         case "START_GAME": {
           if (msg.payload) {
-            set((state) => ({
-              ...state,
-              ...msg.payload,
-            }));
+            const myId = get().myPlayerId;
+            const isHost = get().room?.hostId === myId;
+            set((state) => {
+              let mergedPlayers = msg.payload.players || state.players;
+              if (!isHost) {
+                const myLocal = state.players.find((p) => p.id === myId);
+                if (myLocal && myLocal.role_id) {
+                  mergedPlayers = mergedPlayers.map((p: any) =>
+                    p.id === myId ? { ...p, ...myLocal } : p
+                  );
+                }
+              }
+              return {
+                ...state,
+                ...msg.payload,
+                players: mergedPlayers,
+                myPlayerId: state.myPlayerId,
+                myPlayerName: state.myPlayerName,
+              };
+            });
             narratorVoice.speak("Kartu peran telah dibagikan secara rahasia. Buka kartumu dan bersiaplah.");
           }
           break;

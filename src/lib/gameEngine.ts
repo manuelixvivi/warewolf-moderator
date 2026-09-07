@@ -231,28 +231,32 @@ export function resolveNight(
   const finalPlayers: Player[] = deathChain.updatedPlayers.map((ep) => {
     const original = players.find((p) => p.id === ep.id);
     return {
-      ...(original || ep),
+      ...(original || {}),
+      id: ep.id,
+      name: ep.name,
+      isHost: ep.isHost,
+      isReady: ep.isReady,
       role_id: ep.role_id,
       canonical_name: ep.canonical_name,
       team: ep.team,
       category: ep.category,
       seer_result: ep.seer_result,
       alive: ep.alive,
-      protected: ep.protected,
-      silenced: ep.silenced,
-      inCult: ep.inCult,
-      hasUsedAbility: ep.hasUsedAbility,
+      protected: !!ep.protected,
+      silenced: !!ep.silenced,
+      inCult: !!ep.inCult,
+      hasUsedAbility: !!ep.hasUsedAbility,
     };
   });
 
   const allKilled = Array.from(
     new Set([
       ...outcome.killedPlayerIds,
-      ...deathChain.chainCasualties.map((c) => c.playerId),
+      ...(deathChain.chainCasualties || []),
     ])
   );
 
-  const triggeredList: TriggeredAction[] = deathChain.pendingTriggeredActions.map((t) => ({
+  const triggeredList: TriggeredAction[] = (deathChain.pendingTriggeredActions || []).map((t) => ({
     type: t.type,
     player_id: t.playerId,
     role_name: t.roleName,
@@ -346,9 +350,16 @@ export function resolveDayVotes(
   const updatedPlayers: Player[] = engineUpdated.map((ep) => {
     const original = players.find((p) => p.id === ep.id);
     return {
-      ...(original || ep),
+      ...(original || {}),
+      id: ep.id,
+      name: ep.name,
+      isHost: ep.isHost,
+      isReady: ep.isReady,
       alive: ep.alive,
-      silenced: ep.silenced,
+      silenced: !!ep.silenced,
+      protected: !!ep.protected,
+      inCult: !!ep.inCult,
+      hasUsedAbility: !!ep.hasUsedAbility,
     };
   });
 

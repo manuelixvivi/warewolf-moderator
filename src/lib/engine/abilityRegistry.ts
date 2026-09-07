@@ -93,7 +93,7 @@ export function canPlayerActInNight(
   }
 
   // Witch potions
-  if (player.canonical_name === "Witch" && player.usedAbilityCount >= 2) {
+  if (player.canonical_name === "Witch" && (player.usedAbilityCount || 0) >= 2) {
     return false;
   }
 

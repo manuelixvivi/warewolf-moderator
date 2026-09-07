@@ -37,7 +37,7 @@ export function buildPublicGameState(
     name: p.name,
     alive: p.alive,
     isHost: p.isHost,
-    silenced: p.silenced,
+    silenced: !!p.silenced,
     // Note: role_id, canonical_name, and team are deliberately excluded!
   }));
 
@@ -48,7 +48,10 @@ export function buildPublicGameState(
     nightCount,
     players: publicPlayers,
     narrativeText,
+    gameEnded: !!winner,
     winner,
+    winningPlayerIds: [],
+    winningTeams: [],
     winReason,
     voteTally,
     eliminatedPlayerId,
@@ -83,10 +86,10 @@ export function buildPrivatePlayerState(
     action_type: player.action_type,
     trigger: player.trigger,
     target_type: player.target_type,
-    usage_limit: player.usage_limit,
+    usage_limit: player.usage_limit || "Passive",
     information_level: "Private",
     night_priority: player.night_priority,
-    can_change_role: player.can_change_role,
+    can_change_role: player.can_change_role || false,
     reveal_on_death: "No",
     requires_engine_resolution: true,
     tooltip_en: "",
