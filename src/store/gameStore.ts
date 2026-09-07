@@ -721,6 +721,26 @@ export const useGameStore = create<GameStore>()((set, get) => {
               room: { ...room },
               players: updatedPlayers,
               phase: get().phase,
+              chatMessages: get().chatMessages,
+            },
+          });
+          break;
+        }
+
+        case "REQUEST_SYNC": {
+          if (!isHost || !room) return;
+          network.broadcast({
+            type: "SYNC_STATE",
+            senderId: myPlayerId,
+            payload: {
+              room: { ...room },
+              players: get().players,
+              phase: get().phase,
+              nightCount: get().nightCount,
+              dayCount: get().dayCount,
+              currentNarrative: get().currentNarrative,
+              chatMessages: get().chatMessages,
+              votes: get().votes,
             },
           });
           break;

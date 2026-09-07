@@ -151,6 +151,7 @@ export interface NetworkMessage {
   type:
     | "SYNC_STATE"
     | "JOIN_ROOM"
+    | "REQUEST_SYNC"
     | "PLAYER_LEFT"
     | "TOGGLE_READY"
     | "START_GAME"

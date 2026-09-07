@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useGameStore } from "@/store/gameStore";
+import { network } from "@/lib/network";
 
 export default function JoinRoomScreen() {
   const { joinRoom, setPhase, myPlayerName } = useGameStore();
@@ -32,6 +33,19 @@ export default function JoinRoomScreen() {
 
     try {
       await joinRoom(roomCode.trim(), playerName.trim());
+      // Send sync request to ensure immediate state acquisition from host
+      setTimeout(() => {
+        network.sendToHost({
+          type: "REQUEST_SYNC",
+          senderId: useGameStore.getState().myPlayerId,
+        });
+      }, 500);
+      setTimeout(() => {
+        network.sendToHost({
+          type: "REQUEST_SYNC",
+          senderId: useGameStore.getState().myPlayerId,
+        });
+      }, 1500);
     } catch (err) {
       console.error(err);
       setErrorMsg("Gagal terhubung ke room. Periksa kembali kode room.");

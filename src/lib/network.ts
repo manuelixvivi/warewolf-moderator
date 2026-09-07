@@ -1,22 +1,30 @@
 // ============================================================
-// ASPIRE: WEREWOLF - Realtime Multiplayer Network Engine
-// Uses PeerJS (WebRTC) for multi-device internet connectivity
-// + BroadcastChannel for same-device multi-tab testing
+// ASPIRE: WEREWOLF - High-Reliability Realtime Network Engine
+// Uses Secure WebSocket MQTT (WSS) to guarantee cross-network
+// connectivity across different Wi-Fi, mobile 4G/5G, and firewalls
+// + BroadcastChannel for local instant multi-tab sync
 // ============================================================
 
 import { NetworkMessage } from "@/types/game";
+import mqtt, { MqttClient } from "mqtt";
 
 export type MessageHandler = (msg: NetworkMessage) => void;
 
+// Public reliable WSS brokers (no auth required, port 443/8084/8884 open worldwide)
+const BROKER_URLS = [
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt",
+];
+
 class NetworkEngine {
-  private peer: any = null;
-  private connections: Map<string, any> = new Map();
-  private hostConnection: any = null;
+  private client: MqttClient | null = null;
   private broadcastChannel: BroadcastChannel | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
   private isHost: boolean = false;
   private roomCode: string = "";
   private myPlayerId: string = "";
+  private topic: string = "";
+  private isConnected: boolean = false;
 
   public onMessage(handler: MessageHandler) {
     this.messageHandlers.add(handler);
@@ -30,7 +38,7 @@ class NetworkEngine {
       try {
         handler(msg);
       } catch (err) {
-        console.error("Error in message handler:", err);
+        console.error("Error in network message handler:", err);
       }
     });
   }
@@ -41,8 +49,9 @@ class NetworkEngine {
     this.isHost = true;
     this.roomCode = roomCode.toUpperCase().trim();
     this.myPlayerId = hostPlayerId;
+    this.topic = `aspire-werewolf/v1/${this.roomCode}`;
 
-    // 1. Setup local BroadcastChannel
+    // 1. Setup local BroadcastChannel for same-device multi-tab testing
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
       this.broadcastChannel = new BroadcastChannel(`aspire_room_${this.roomCode}`);
       this.broadcastChannel.onmessage = (event) => {
@@ -53,49 +62,8 @@ class NetworkEngine {
       };
     }
 
-    // 2. Setup PeerJS
-    if (typeof window !== "undefined") {
-      try {
-        const { default: Peer } = await import("peerjs");
-        const peerId = `aspire-host-${this.roomCode}`;
-
-        this.peer = new Peer(peerId, {
-          debug: 1,
-        });
-
-        this.peer.on("open", (id: string) => {
-          console.log("Host PeerJS ready with ID:", id);
-        });
-
-        this.peer.on("connection", (conn: any) => {
-          console.log("New player connected to host:", conn.peer);
-          conn.on("open", () => {
-            this.connections.set(conn.peer, conn);
-          });
-
-          conn.on("data", (data: any) => {
-            if (data && typeof data === "object") {
-              this.dispatchMessage(data as NetworkMessage);
-            }
-          });
-
-          conn.on("close", () => {
-            this.connections.delete(conn.peer);
-          });
-
-          conn.on("error", (err: any) => {
-            console.warn("Peer connection error:", err);
-            this.connections.delete(conn.peer);
-          });
-        });
-
-        this.peer.on("error", (err: any) => {
-          console.warn("Host Peer error (may fallback to local broadcast):", err);
-        });
-      } catch (err) {
-        console.warn("Failed to load PeerJS for host, using BroadcastChannel only:", err);
-      }
-    }
+    // 2. Connect to Cloud WSS Broker
+    await this.connectMqtt(0);
 
     return this.roomCode;
   }
@@ -106,6 +74,7 @@ class NetworkEngine {
     this.isHost = false;
     this.roomCode = roomCode.toUpperCase().trim();
     this.myPlayerId = playerId;
+    this.topic = `aspire-werewolf/v1/${this.roomCode}`;
 
     // 1. Setup local BroadcastChannel
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
@@ -116,108 +85,163 @@ class NetworkEngine {
           this.dispatchMessage(msg);
         }
       };
-
-      // Announce join via BroadcastChannel
-      this.broadcastChannel.postMessage({
-        type: "JOIN_ROOM",
-        senderId: this.myPlayerId,
-        senderName: playerName,
-        payload: { id: playerId, name: playerName },
-      });
     }
 
-    // 2. Setup PeerJS Client
-    if (typeof window !== "undefined") {
+    // 2. Connect to Cloud WSS Broker
+    await this.connectMqtt(0);
+
+    // 3. Send JOIN_ROOM message with periodic heartbeat until Host acknowledges
+    const joinMsg: NetworkMessage = {
+      type: "JOIN_ROOM",
+      senderId: this.myPlayerId,
+      senderName: playerName,
+      payload: { id: playerId, name: playerName },
+    };
+
+    // Send immediately via local broadcast
+    if (this.broadcastChannel) {
       try {
-        const { default: Peer } = await import("peerjs");
-        const clientPeerId = `aspire-p-${playerId}-${Math.random().toString(36).substring(2, 6)}`;
-        this.peer = new Peer(clientPeerId, { debug: 1 });
-
-        this.peer.on("open", () => {
-          const targetHostId = `aspire-host-${this.roomCode}`;
-          const conn = this.peer.connect(targetHostId, { reliable: true });
-
-          conn.on("open", () => {
-            console.log("Connected to Host via WebRTC!");
-            this.hostConnection = conn;
-
-            // Send Join Message to Host
-            conn.send({
-              type: "JOIN_ROOM",
-              senderId: this.myPlayerId,
-              senderName: playerName,
-              payload: { id: playerId, name: playerName },
-            });
-          });
-
-          conn.on("data", (data: any) => {
-            if (data && typeof data === "object") {
-              this.dispatchMessage(data as NetworkMessage);
-            }
-          });
-
-          conn.on("close", () => {
-            console.warn("Connection to host closed");
-            this.hostConnection = null;
-          });
-
-          conn.on("error", (err: any) => {
-            console.warn("Host conn error:", err);
-          });
-        });
-
-        this.peer.on("error", (err: any) => {
-          console.warn("Client peer error:", err);
-        });
-      } catch (err) {
-        console.warn("Failed to connect via WebRTC, relying on BroadcastChannel:", err);
-      }
+        this.broadcastChannel.postMessage(joinMsg);
+      } catch {}
     }
+
+    // Publish to cloud WSS
+    this.sendToHost(joinMsg);
+
+    // Heartbeat: re-send join request 1s and 2s later to guarantee delivery over mobile networks
+    setTimeout(() => this.sendToHost(joinMsg), 1000);
+    setTimeout(() => this.sendToHost(joinMsg), 2500);
 
     return true;
   }
 
-  // ── Broadcast Message (Host to all clients) ────────────────
-  public broadcast(msg: NetworkMessage) {
-    // Send via WebRTC to all connected peers
-    this.connections.forEach((conn) => {
-      if (conn && conn.open) {
-        try {
-          conn.send(msg);
-        } catch (e) {
-          console.warn("Error sending to peer:", e);
-        }
+  // ── Connect to MQTT over WSS ───────────────────────────────
+  private connectMqtt(brokerIndex: number): Promise<void> {
+    return new Promise((resolve) => {
+      if (typeof window === "undefined") {
+        resolve();
+        return;
+      }
+
+      const brokerUrl = BROKER_URLS[brokerIndex % BROKER_URLS.length];
+      const clientId = `aspire_${this.isHost ? "host" : "client"}_${this.myPlayerId}_${Math.random()
+        .toString(36)
+        .substring(2, 6)}`;
+
+      try {
+        this.client = mqtt.connect(brokerUrl, {
+          clientId,
+          clean: true,
+          reconnectPeriod: 2000,
+          connectTimeout: 7000,
+          keepalive: 30,
+        });
+
+        this.client.on("connect", () => {
+          this.isConnected = true;
+          console.log(`Connected to WSS Broker [${brokerUrl}] for room: ${this.roomCode}`);
+
+          if (this.topic && this.client) {
+            this.client.subscribe(this.topic, { qos: 1 }, (err) => {
+              if (err) console.warn("Subscribe error:", err);
+              resolve();
+            });
+          } else {
+            resolve();
+          }
+        });
+
+        this.client.on("message", (recvTopic, payload) => {
+          if (recvTopic === this.topic) {
+            try {
+              const msgStr = payload.toString();
+              const msg = JSON.parse(msgStr) as NetworkMessage;
+              if (msg && msg.senderId !== this.myPlayerId) {
+                this.dispatchMessage(msg);
+              }
+            } catch (err) {
+              console.warn("Failed to parse network message:", err);
+            }
+          }
+        });
+
+        this.client.on("error", (err) => {
+          console.warn("WSS Broker error:", err);
+          // Try next fallback broker if connection failed
+          if (!this.isConnected && brokerIndex + 1 < BROKER_URLS.length) {
+            try {
+              this.client?.end(true);
+            } catch {}
+            this.connectMqtt(brokerIndex + 1).then(resolve);
+          } else {
+            resolve();
+          }
+        });
+
+        this.client.on("close", () => {
+          this.isConnected = false;
+        });
+
+        // Timeout fallback
+        setTimeout(() => {
+          resolve();
+        }, 3000);
+      } catch (err) {
+        console.warn("MQTT connect exception:", err);
+        resolve();
       }
     });
+  }
 
-    // Send via local BroadcastChannel
+  // ── Broadcast Message (Host to all players) ─────────────────
+  public broadcast(msg: NetworkMessage) {
+    const raw = JSON.stringify(msg);
+
+    // 1. Send via Cloud WSS Broker
+    if (this.client && this.client.connected && this.topic) {
+      try {
+        this.client.publish(this.topic, raw, { qos: 1 });
+      } catch (err) {
+        console.warn("Error publishing to MQTT:", err);
+      }
+    }
+
+    // 2. Send via local BroadcastChannel
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage(msg);
-      } catch (e) {
-        console.warn("Error posting to broadcast channel:", e);
+      } catch (err) {
+        console.warn("Error posting to broadcast channel:", err);
       }
     }
   }
 
-  // ── Send to Host (Client to Host) ──────────────────────────
+  // ── Send to Host (Client to Host) ───────────────────────────
   public sendToHost(msg: NetworkMessage) {
-    if (this.hostConnection && this.hostConnection.open) {
+    const raw = JSON.stringify(msg);
+
+    // 1. Send via Cloud WSS Broker
+    if (this.client && this.client.connected && this.topic) {
       try {
-        this.hostConnection.send(msg);
-      } catch (e) {
-        console.warn("Error sending to host via PeerJS:", e);
+        this.client.publish(this.topic, raw, { qos: 1 });
+      } catch (err) {
+        console.warn("Error publishing to MQTT:", err);
       }
     }
 
-    // Always mirror to BroadcastChannel as well
+    // 2. Mirror to BroadcastChannel
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage(msg);
-      } catch (e) {
-        console.warn("Error posting to broadcast channel:", e);
+      } catch (err) {
+        console.warn("Error posting to broadcast channel:", err);
       }
     }
+  }
+
+  // ── Status Check ───────────────────────────────────────────
+  public isNetworkConnected(): boolean {
+    return this.isConnected;
   }
 
   // ── Disconnect & Cleanup ───────────────────────────────────
@@ -229,29 +253,20 @@ class NetworkEngine {
       this.broadcastChannel = null;
     }
 
-    if (this.hostConnection) {
+    if (this.client) {
       try {
-        this.hostConnection.close();
+        if (this.topic) {
+          this.client.unsubscribe(this.topic);
+        }
+        this.client.end(true);
       } catch {}
-      this.hostConnection = null;
-    }
-
-    this.connections.forEach((conn) => {
-      try {
-        conn.close();
-      } catch {}
-    });
-    this.connections.clear();
-
-    if (this.peer) {
-      try {
-        this.peer.destroy();
-      } catch {}
-      this.peer = null;
+      this.client = null;
     }
 
     this.isHost = false;
     this.roomCode = "";
+    this.topic = "";
+    this.isConnected = false;
   }
 }
 
