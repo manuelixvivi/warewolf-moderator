@@ -60,6 +60,7 @@ export interface RoomInfo {
   narrationStyle: string;
   selectedRoles: SelectedRole[];
   voiceEnabled: boolean;
+  gameMode?: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER";
 }
 
 export interface Player {

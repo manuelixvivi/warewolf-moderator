@@ -1,38 +1,105 @@
-import { Player, NightAction, NightResult, TriggeredAction, WinResult, SelectedRole, RoleData } from "@/types/game";
-import rolesJson from "@/data/roles.json";
+// ============================================================
+// ASPIRE: WEREWOLF - Unified Rules & Game Engine
+// Driven by Role Database Blueprint
+// "One Village. Many Lies. One Wolf."
+// ============================================================
 
-const ALL_ROLES = rolesJson as RoleData[];
+import {
+  Player,
+  NightAction,
+  NightResult,
+  TriggeredAction,
+  WinResult,
+  SelectedRole,
+  RoleData,
+} from "@/types/game";
+import {
+  GameMode,
+  PlayerEngineState,
+  EngineNightAction,
+} from "./engine/types";
+import {
+  ALL_ROLES,
+  ALL_ABILITIES,
+  evaluateSeerResult,
+  buildEngineNightActions,
+  getRoleById,
+  getRoleByName,
+} from "./engine/abilityRegistry";
+import { resolveNightActions } from "./engine/actionResolver";
+import { resolveDeathChain } from "./engine/deathResolver";
+import { resolveDayVotes as engineResolveDayVotes } from "./engine/voteResolver";
+import { evaluateWinConditions } from "./engine/winEngine";
+import {
+  MINIMUM_PLAYERS,
+  validateMode1Fixed,
+  selectBalancedSubsetFromPool,
+  generateBalancedRandomComposition,
+  calculateCompositionBalance,
+  shuffleRoles,
+} from "./engine/balanceEngine";
+import { generateFallbackNarrative } from "./narration/fallbackProvider";
 
-// ── 1. Role Randomizer ──────────────────────────────────────────────
+export {
+  ALL_ROLES,
+  ALL_ABILITIES,
+  MINIMUM_PLAYERS,
+  evaluateSeerResult,
+  calculateCompositionBalance,
+  validateMode1Fixed,
+  selectBalancedSubsetFromPool,
+  generateBalancedRandomComposition,
+  getRoleById,
+  getRoleByName,
+};
+
+// ── 1. Role Randomizer & Allocator ──────────────────────────────────
 export function randomizeRolesToPlayers(
   players: Player[],
-  selectedRoles: SelectedRole[]
+  selectedRoles: SelectedRole[],
+  mode: GameMode = "MODE_1_FIXED"
 ): Player[] {
-  // 1. Expand selected roles into full role array
-  const rolePool: RoleData[] = [];
-  for (const sr of selectedRoles) {
-    const roleData = ALL_ROLES.find((r) => r.role_id === sr.role_id);
-    if (roleData) {
-      for (let i = 0; i < sr.count; i++) {
-        rolePool.push(roleData);
+  let roleList: RoleData[] = [];
+
+  if (mode === "MODE_1_FIXED") {
+    // Exact match enforcement. No silent Villager padding!
+    const validation = validateMode1Fixed(players.length, selectedRoles);
+    if (!validation.valid) {
+      throw new Error(validation.error || "Komposisi Mode 1 tidak valid.");
+    }
+    for (const sr of selectedRoles) {
+      const data = ALL_ROLES.find((r) => r.role_id === sr.role_id);
+      if (data) {
+        for (let i = 0; i < sr.count; i++) {
+          roleList.push(data);
+        }
       }
+    }
+  } else if (mode === "MODE_2_POOL") {
+    // Balanced subset from host's selected pool
+    roleList = selectBalancedSubsetFromPool(selectedRoles, players.length);
+  } else if (mode === "MODE_3_RANDOM") {
+    // Dynamic generated balanced set for actual player count
+    roleList = generateBalancedRandomComposition(players.length);
+  } else {
+    // Moderator Helper / Custom
+    for (const sr of selectedRoles) {
+      const data = ALL_ROLES.find((r) => r.role_id === sr.role_id);
+      if (data) {
+        for (let i = 0; i < sr.count; i++) {
+          roleList.push(data);
+        }
+      }
+    }
+    const villagerRole = ALL_ROLES.find((r) => r.canonical_name === "Villager") || ALL_ROLES[0];
+    while (roleList.length < players.length) {
+      roleList.push(villagerRole);
     }
   }
 
-  // If rolePool is smaller than players, fill remainder with Villager
-  const villagerRole = ALL_ROLES.find((r) => r.canonical_name === "Villager") || ALL_ROLES[0];
-  while (rolePool.length < players.length) {
-    rolePool.push(villagerRole);
-  }
+  // Shuffle roles
+  const shuffled = shuffleRoles(roleList);
 
-  // 2. Fisher-Yates cryptographically-secure shuffle
-  const shuffled = [...rolePool];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-
-  // 3. Assign role to each player
   return players.map((player, idx) => {
     const role = shuffled[idx];
     return {
@@ -50,7 +117,7 @@ export function randomizeRolesToPlayers(
       action_type: role.action_type,
       target_type: role.target_type,
       usage_limit: role.usage_limit,
-      night_priority: role.night_priority || 99,
+      night_priority: role.night_priority || 50,
       can_change_role: role.can_change_role,
       alive: true,
       protected: false,
@@ -64,149 +131,172 @@ export function randomizeRolesToPlayers(
 }
 
 // ── 2. Build Night Actions ──────────────────────────────────────────
-export function buildNightActions(players: Player[], nightCount: number = 1): NightAction[] {
-  const alivePlayers = players.filter((p) => p.alive);
-  const actions: NightAction[] = [];
-  const roleGroups = new Map<string, Player[]>();
+export function buildNightActions(
+  players: Player[],
+  nightCount: number = 1,
+  wolfCubExtraKill: boolean = false
+): NightAction[] {
+  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
+    ...p,
+    role_id: p.role_id || "ROLE-066",
+    canonical_name: p.canonical_name || "Villager",
+    team: p.team || "Village",
+    originalTeam: p.team || "Village",
+    category: p.category || "Village",
+    seer_result: p.seer_result || "Villager",
+    role_points: 1,
+    balance_weight: 0,
+    night_priority: p.night_priority || 50,
+    active_phase: p.active_phase || "None",
+    action_type: p.action_type || "None",
+    trigger: "",
+    target_type: p.target_type || "None",
+    usage_limit: p.usage_limit || "Passive",
+    can_change_role: p.can_change_role || false,
+    isCursed: p.canonical_name === "Cursed",
+    usedAbilityCount: 0,
+  }));
 
-  for (const p of alivePlayers) {
-    const phase = (p.active_phase || "").toLowerCase();
+  const engineActions = buildEngineNightActions(enginePlayers, nightCount, wolfCubExtraKill);
 
-    // Only roles whose active phase contains "night" (excludes triggered/passive)
-    if (!phase.includes("night")) continue;
-
-    // Roles strictly First Night / Night 1 do not wake on Night 2+
-    const isFirstNightOnly =
-      (phase.includes("night 1") || phase.includes("first night")) &&
-      !phase.includes("/ night");
-    if (nightCount > 1 && isFirstNightOnly) continue;
-
-    const actionType = (p.action_type || "").toLowerCase();
-    if (!actionType || actionType === "passive" || actionType === "none" || actionType === "vote") {
-      continue;
-    }
-
-    if (!roleGroups.has(p.canonical_name || "Unknown")) {
-      roleGroups.set(p.canonical_name || "Unknown", []);
-    }
-    roleGroups.get(p.canonical_name || "Unknown")!.push(p);
-  }
-
-  for (const [roleName, rolePlayers] of roleGroups) {
-    const rep = rolePlayers[0];
-    actions.push({
-      id: `action-${roleName}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      role_id: rep.role_id || "",
-      role_name: roleName,
-      player_ids: rolePlayers.map((p) => p.id),
-      action_type: rep.action_type || "Aksi",
-      target_player_id: null,
-      completed: false,
-      priority: rep.night_priority || 50,
-    });
-  }
-
-  return actions.sort((a, b) => a.priority - b.priority);
+  return engineActions.map((ea) => ({
+    id: ea.id,
+    role_id: ea.role_id,
+    role_name: ea.role_name,
+    player_ids: ea.player_ids,
+    action_type: ea.action_type,
+    target_player_id: ea.target_player_id,
+    target2_player_id: ea.secondary_target_id,
+    completed: ea.completed,
+    priority: ea.priority,
+  }));
 }
 
 // ── 3. Resolve Night Phase ──────────────────────────────────────────
 export function resolveNight(
   players: Player[],
-  actions: NightAction[]
-): { updatedPlayers: Player[]; result: NightResult; triggered: TriggeredAction[] } {
-  const sortedActions = [...actions].sort((a, b) => a.priority - b.priority);
-  const playerMap = new Map<string, Player>(players.map((p) => [p.id, { ...p, protected: false }]));
+  actions: NightAction[],
+  nightCount: number = 1
+): {
+  updatedPlayers: Player[];
+  result: NightResult;
+  triggered: TriggeredAction[];
+} {
+  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
+    ...p,
+    role_id: p.role_id || "ROLE-066",
+    canonical_name: p.canonical_name || "Villager",
+    team: p.team || "Village",
+    originalTeam: p.team || "Village",
+    category: p.category || "Village",
+    seer_result: p.seer_result || "Villager",
+    role_points: 1,
+    balance_weight: 0,
+    night_priority: p.night_priority || 50,
+    active_phase: p.active_phase || "None",
+    action_type: p.action_type || "None",
+    trigger: "",
+    target_type: p.target_type || "None",
+    usage_limit: p.usage_limit || "Passive",
+    can_change_role: p.can_change_role || false,
+    isCursed: p.canonical_name === "Cursed",
+    usedAbilityCount: 0,
+  }));
+
+  const engineActions: EngineNightAction[] = actions.map((a) => ({
+    id: a.id,
+    role_id: a.role_id,
+    role_name: a.role_name,
+    player_ids: a.player_ids,
+    action_type: a.action_type,
+    target_player_id: a.target_player_id,
+    secondary_target_id: a.target2_player_id,
+    priority: a.priority,
+    completed: a.completed,
+  }));
+
+  const { updatedPlayers: resolvedPlayers, outcome } = resolveNightActions(
+    enginePlayers,
+    engineActions,
+    nightCount
+  );
+
+  // Process any secondary death chain reactions
+  const deathChain = resolveDeathChain(
+    resolvedPlayers,
+    outcome.killedPlayerIds,
+    "WEREWOLF"
+  );
+
+  const finalPlayers: Player[] = deathChain.updatedPlayers.map((ep) => {
+    const original = players.find((p) => p.id === ep.id);
+    return {
+      ...(original || ep),
+      role_id: ep.role_id,
+      canonical_name: ep.canonical_name,
+      team: ep.team,
+      category: ep.category,
+      seer_result: ep.seer_result,
+      alive: ep.alive,
+      protected: ep.protected,
+      silenced: ep.silenced,
+      inCult: ep.inCult,
+      hasUsedAbility: ep.hasUsedAbility,
+    };
+  });
+
+  const allKilled = Array.from(
+    new Set([
+      ...outcome.killedPlayerIds,
+      ...deathChain.chainCasualties.map((c) => c.playerId),
+    ])
+  );
+
+  const triggeredList: TriggeredAction[] = deathChain.pendingTriggeredActions.map((t) => ({
+    type: t.type,
+    player_id: t.playerId,
+    role_name: t.roleName,
+    completed: false,
+  }));
+
+  const playerMap = new Map<string, Player>(finalPlayers.map((p) => [p.id, p]));
+  const killedNames = allKilled.map((id) => playerMap.get(id)?.name || "").filter(Boolean);
+  const savedNames = outcome.savedPlayerIds.map((id) => playerMap.get(id)?.name || "").filter(Boolean);
+
+  const narrative = generateFallbackNarrative({
+    phase: "MORNING",
+    theme: "CLASSIC_MEDIEVAL",
+    style: "DRAMATIC",
+    dayCount: nightCount,
+    nightCount: nightCount,
+    facts: {
+      killedPlayerNames: killedNames,
+      savedPlayerNames: savedNames,
+    },
+  });
 
   const result: NightResult = {
-    killed: [],
-    protected: [],
-    investigated: [],
-    conversions: [],
-    silenced: [],
-    triggered: [],
-    narrative: "",
+    killed: allKilled,
+    protected: outcome.savedPlayerIds,
+    investigated: outcome.investigations.map((inv) => ({
+      investigator: inv.investigatorId,
+      target: inv.targetId,
+      result: inv.result,
+    })),
+    conversions: outcome.convertedPlayerIds.map((c) => ({
+      player: c.playerId,
+      newTeam: c.newTeam,
+    })),
+    silenced: outcome.silencedPlayerIds,
+    triggered: triggeredList,
+    narrative,
   };
-  const triggered: TriggeredAction[] = [];
 
-  // Phase 1: Protections (Bodyguard, Doctor, Priest)
-  for (const action of sortedActions) {
-    if (!action.completed || !action.target_player_id) continue;
-    const targetId = action.target_player_id;
-
-    // Bodyguard cannot protect self
-    if (action.role_name.toLowerCase().includes("bodyguard") && action.player_ids.includes(targetId)) {
-      continue;
-    }
-
-    if (["Protect", "Protect/Heal", "Guard"].some((t) => action.action_type.includes(t))) {
-      const target = playerMap.get(targetId);
-      if (target) {
-        playerMap.set(targetId, { ...target, protected: true });
-      }
-    }
-  }
-
-  // Phase 2: Kills (Werewolves, Vampire, etc.)
-  for (const action of sortedActions) {
-    if (!action.completed || !action.target_player_id) continue;
-    const targetId = action.target_player_id;
-
-    if (["Kill", "Eliminate", "Attack", "Werewolf Action"].some((t) => action.action_type.includes(t))) {
-      const target = playerMap.get(targetId);
-      if (target && target.alive) {
-        if (target.protected) {
-          result.protected.push(targetId);
-        } else {
-          result.killed.push(targetId);
-          playerMap.set(targetId, { ...target, alive: false });
-        }
-      }
-    }
-  }
-
-  // Phase 3: Investigations (Seer, Aura Seer, Sorceress)
-  for (const action of sortedActions) {
-    if (!action.completed || !action.target_player_id) continue;
-    const targetId = action.target_player_id;
-
-    if (["Investigate", "Check", "See", "Find Seer"].some((t) => action.action_type.includes(t))) {
-      const target = playerMap.get(targetId);
-      if (target) {
-        const seerResult = getSeerResult(target);
-        result.investigated.push({
-          investigator: action.player_ids[0] || "",
-          target: targetId,
-          result: seerResult,
-        });
-      }
-    }
-  }
-
-  // Triggered actions upon death
-  for (const killedId of result.killed) {
-    const killed = playerMap.get(killedId);
-    if (!killed) continue;
-
-    if (killed.canonical_name === "Hunter") {
-      triggered.push({
-        type: "HUNTER",
-        player_id: killedId,
-        role_name: "Hunter",
-        completed: false,
-      });
-    } else if (killed.canonical_name === "Wolf Cub") {
-      triggered.push({
-        type: "WOLF_CUB_EXTRA",
-        player_id: killedId,
-        role_name: "Wolf Cub",
-        completed: true,
-      });
-    }
-  }
-
-  result.triggered = triggered;
-  result.narrative = generateNightNarrative(result, playerMap);
-  return { updatedPlayers: Array.from(playerMap.values()), result, triggered };
+  return {
+    updatedPlayers: finalPlayers,
+    result,
+    triggered: triggeredList,
+  };
 }
 
 // ── 4. Seer Calculation ─────────────────────────────────────────────
@@ -225,153 +315,144 @@ export function resolveDayVotes(
   tally: Record<string, number>;
   triggered: TriggeredAction[];
 } {
-  const tally: Record<string, number> = {};
-  const alivePlayers = players.filter((p) => p.alive);
+  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
+    ...p,
+    role_id: p.role_id || "ROLE-066",
+    canonical_name: p.canonical_name || "Villager",
+    team: p.team || "Village",
+    originalTeam: p.team || "Village",
+    category: p.category || "Village",
+    seer_result: p.seer_result || "Villager",
+    role_points: 1,
+    balance_weight: 0,
+    night_priority: p.night_priority || 50,
+    active_phase: p.active_phase || "None",
+    action_type: p.action_type || "None",
+    trigger: "",
+    target_type: p.target_type || "None",
+    usage_limit: p.usage_limit || "Passive",
+    can_change_role: p.can_change_role || false,
+    isCursed: p.canonical_name === "Cursed",
+    usedAbilityCount: 0,
+    tannerWon: false,
+    princeProtectedUsed: false,
+  }));
 
-  for (const p of alivePlayers) {
-    tally[p.id] = 0;
-  }
+  const { updatedPlayers: engineUpdated, outcome } = engineResolveDayVotes(
+    enginePlayers,
+    votes
+  );
 
-  for (const [voterId, targetId] of Object.entries(votes)) {
-    const voter = players.find((p) => p.id === voterId);
-    if (voter && voter.alive && targetId && tally[targetId] !== undefined) {
-      // Mayor has 2 votes
-      const voteWeight = voter.canonical_name === "Mayor" ? 2 : 1;
-      tally[targetId] += voteWeight;
-    }
-  }
-
-  let maxVotes = 0;
-  let topTargetId: string | null = null;
-  let isTie = false;
-
-  for (const [targetId, count] of Object.entries(tally)) {
-    if (count > maxVotes) {
-      maxVotes = count;
-      topTargetId = targetId;
-      isTie = false;
-    } else if (count === maxVotes && maxVotes > 0) {
-      isTie = true;
-    }
-  }
-
-  // If tie or 0 votes, no one eliminated
-  if (isTie || maxVotes === 0 || !topTargetId) {
+  const updatedPlayers: Player[] = engineUpdated.map((ep) => {
+    const original = players.find((p) => p.id === ep.id);
     return {
-      updatedPlayers: players,
-      eliminatedPlayer: null,
-      tally,
-      triggered: [],
+      ...(original || ep),
+      alive: ep.alive,
+      silenced: ep.silenced,
     };
-  }
-
-  const triggered: TriggeredAction[] = [];
-  const updatedPlayers = players.map((p) => {
-    if (p.id === topTargetId) {
-      if (p.canonical_name === "Prince") {
-        // Prince survives first lynching
-        return p;
-      }
-      if (p.canonical_name === "Hunter") {
-        triggered.push({
-          type: "HUNTER",
-          player_id: p.id,
-          role_name: "Hunter",
-          completed: false,
-        });
-      }
-      if (p.canonical_name === "Tanner") {
-        triggered.push({
-          type: "TANNER_WIN",
-          player_id: p.id,
-          role_name: "Tanner",
-          completed: true,
-        });
-      }
-      return { ...p, alive: false };
-    }
-    return p;
   });
 
-  const eliminatedPlayer = players.find((p) => p.id === topTargetId) || null;
+  const eliminated = outcome.eliminatedPlayer
+    ? players.find((p) => p.id === outcome.eliminatedPlayer!.id) || null
+    : null;
+
+  const triggered: TriggeredAction[] = outcome.triggeredRetaliations.map((tr) => ({
+    type: tr.type,
+    player_id: tr.playerId,
+    role_name: tr.roleName,
+    completed: false,
+  }));
+
+  if (outcome.tannerWon && outcome.eliminatedPlayer) {
+    triggered.push({
+      type: "TANNER_WIN",
+      player_id: outcome.eliminatedPlayer.id,
+      role_name: "Tanner",
+      completed: true,
+    });
+  }
 
   return {
     updatedPlayers,
-    eliminatedPlayer,
-    tally,
+    eliminatedPlayer: eliminated,
+    tally: outcome.tally,
     triggered,
   };
 }
 
 // ── 6. Check Win Condition ──────────────────────────────────────────
 export function checkWinCondition(players: Player[]): WinResult | null {
-  const alivePlayers = players.filter((p) => p.alive);
-  const aliveWerewolves = alivePlayers.filter(
-    (p) => p.team === "Werewolf" || p.team === "Werewolf-aligned" || p.team === "Solo Werewolf"
-  );
-  const aliveVillage = alivePlayers.filter(
-    (p) => p.team === "Village" || p.team === "Village/Dynamic"
-  );
+  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
+    ...p,
+    role_id: p.role_id || "ROLE-066",
+    canonical_name: p.canonical_name || "Villager",
+    team: p.team || "Village",
+    originalTeam: p.team || "Village",
+    category: p.category || "Village",
+    seer_result: p.seer_result || "Villager",
+    role_points: 1,
+    balance_weight: 0,
+    night_priority: p.night_priority || 50,
+    active_phase: p.active_phase || "None",
+    action_type: p.action_type || "None",
+    trigger: "",
+    target_type: p.target_type || "None",
+    usage_limit: p.usage_limit || "Passive",
+    can_change_role: p.can_change_role || false,
+    isCursed: false,
+    usedAbilityCount: 0,
+  }));
 
-  // Werewolf win: Werewolves >= Village and Werewolves > 0
-  if (aliveWerewolves.length >= aliveVillage.length && aliveWerewolves.length > 0) {
+  const res = evaluateWinConditions(enginePlayers);
+  if (res.hasWon && res.winner) {
     return {
-      winner: "Werewolf",
-      reason: "Para Werewolf telah berhasil menguasai desa! Jumlah serigala telah menyamai atau melebihi warga.",
+      winner: res.winner,
+      reason: res.reason,
     };
   }
-
-  // Village win: All Werewolves eliminated
-  if (aliveWerewolves.length === 0 && alivePlayers.length > 0) {
-    return {
-      winner: "Village",
-      reason: "Semua Werewolf telah berhasil dieliminasi! Desa kini aman dan damai kembali.",
-    };
-  }
-
-  // All dead: Draw
-  if (alivePlayers.length === 0) {
-    return {
-      winner: "Draw",
-      reason: "Semua pemain telah gugur. Tidak ada yang selamat di desa ini.",
-    };
-  }
-
   return null;
 }
 
 // ── 7. Atmospheric Narratives ───────────────────────────────────────
-export function generateNightNarrative(result: NightResult, playerMap: Map<string, Player>): string {
-  if (result.killed.length === 0 && result.protected.length > 0) {
-    const savedName = playerMap.get(result.protected[0])?.name || "seorang warga";
-    return `Malam penuh ketegangan telah berlalu. Terjangan cakar serigala nyaris merenggut nyawa ${savedName}, namun perlindungan suci berhasil menyelamatkannya!`;
-  }
+export function generateNightNarrative(
+  result: NightResult,
+  playerMap: Map<string, Player>
+): string {
+  const killedNames = result.killed
+    .map((id) => playerMap.get(id)?.name || "seseorang")
+    .filter(Boolean);
+  const savedNames = result.protected
+    .map((id) => playerMap.get(id)?.name || "seorang warga")
+    .filter(Boolean);
 
-  if (result.killed.length === 0) {
-    return `Kabut malam berangsur menipis. Dinginnya malam tidak merenggut korban jiwa. Semua warga terbangun dalam keadaan selamat.`;
-  }
-
-  const killedNames = result.killed.map((id) => playerMap.get(id)?.name || "seseorang").join(" dan ");
-  return `Lolongan serigala terdengar merobek sunyinya malam. Saat fajar tiba, warga desa menemukan ${killedNames} terbujur kaku tanpa nyawa...`;
+  return generateFallbackNarrative({
+    phase: "MORNING",
+    theme: "CLASSIC_MEDIEVAL",
+    style: "DRAMATIC",
+    dayCount: 1,
+    nightCount: 1,
+    facts: {
+      killedPlayerNames: killedNames,
+      savedPlayerNames: savedNames,
+    },
+  });
 }
 
 export function generateDayNarrative(
   killedPlayers: Player[],
   theme: string = "Dark Fantasy"
 ): string {
+  const names = killedPlayers.map((p) => p.name).join(" dan ");
   if (killedPlayers.length === 0) {
     return (
       "☀️ **FAJAR TELAH TIBA DI DESA ASPIRE**\n\n" +
-      "Matahari terbit menembus pepohonan lebat. Tidak ada ceceran darah malam ini.\n\n" +
-      "Seluruh warga berkumpul di alun-alun desa, saling bertukar tatap penuh curiga. Siapakah serigala yang bersembunyi di antara kalian?"
+      "Matahari terbit menembus kabut dingin. Seluruh warga berkumpul di alun-alun dengan selamat. Namun kecurigaan terus menyelimuti setiap pasang mata..."
     );
   }
 
-  const names = killedPlayers.map((p) => p.name).join(" dan ");
   return (
     "☀️ **DUKA MENYELIMUTI DESA ASPIRE**\n\n" +
-    `Fajar menyingsing dengan bau anyir darah yang menusuk hidung.\n\n` +
-    `Warga desa menemukan **${names}** telah gugur dimangsa semalam.\n\n` +
-    `Kepanikan mulai merayapi setiap jiwa. Waktu berdiskusi dimulai — temukan sang serigala sebelum malam berikutnya tiba!`
+    `Lonceng kematian berdentang memecah sunyi. Warga desa menemukan **${names}** terbujur kaku tanpa nyawa.\n\n` +
+    `Waktu berdiskusi dimulai — temukan sang pengkhianat sebelum malam berikutnya tiba!`
   );
 }

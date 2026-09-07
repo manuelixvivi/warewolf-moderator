@@ -1856,7 +1856,7 @@
     "entity_type": "Role",
     "category": "Werewolf",
     "team": "Werewolf",
-    "seer_result": "Werewolf",
+    "seer_result": "Villager",
     "description_en": "You wake with the other Werewolves each night, but the Seer sees you as a Villager.",
     "role_points": 3,
     "balance_weight": -3,

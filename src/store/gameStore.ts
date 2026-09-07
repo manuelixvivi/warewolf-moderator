@@ -26,7 +26,13 @@ interface GameStore extends GameState {
   // Navigation & Room Setup
   setPhase: (phase: Phase) => void;
   setPlayerName: (name: string) => void;
-  createRoom: (hostName: string, selectedRoles: SelectedRole[], theme: string) => Promise<string>;
+  createRoom: (
+    hostName: string,
+    selectedRoles: SelectedRole[],
+    theme: string,
+    gameMode?: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER",
+    targetPlayerCount?: number
+  ) => Promise<string>;
   joinRoom: (roomCode: string, playerName: string) => Promise<boolean>;
   leaveRoom: () => void;
   toggleVoice: () => void;
@@ -135,10 +141,19 @@ export const useGameStore = create<GameStore>()((set, get) => {
     },
 
     // ── Host Creates Room ──────────────────────────────────────
-    createRoom: async (hostName: string, selectedRoles: SelectedRole[], theme: string) => {
+    createRoom: async (
+      hostName: string,
+      selectedRoles: SelectedRole[],
+      theme: string,
+      gameMode: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER" = "MODE_1_FIXED",
+      targetPlayerCount?: number
+    ) => {
       const hostId = get().myPlayerId;
       const roomCode = generateRoomCode();
-      const targetCount = selectedRoles.reduce((sum, r) => sum + r.count, 0);
+      const targetCount =
+        gameMode === "MODE_3_RANDOM"
+          ? (targetPlayerCount || 8)
+          : selectedRoles.reduce((sum, r) => sum + r.count, 0);
 
       get().setPlayerName(hostName);
 
@@ -164,6 +179,7 @@ export const useGameStore = create<GameStore>()((set, get) => {
         narrationStyle: "Dramatic",
         selectedRoles,
         voiceEnabled: true,
+        gameMode,
       };
 
       await network.initHost(roomCode, hostId);
@@ -223,14 +239,30 @@ export const useGameStore = create<GameStore>()((set, get) => {
       const { room, players, myPlayerId } = get();
       if (!room || myPlayerId !== room.hostId) return;
 
-      // Only start if room is full
-      if (players.length < room.targetPlayerCount) {
-        alert(`Room belum penuh! Menunggu ${room.targetPlayerCount - players.length} pemain lagi.`);
+      const mode = room.gameMode || "MODE_1_FIXED";
+
+      // 1. Strict minimum 5 players across ALL modes
+      if (players.length < 5) {
+        alert(`Minimal 5 pemain dibutuhkan untuk memulai permainan ASPIRE: WEREWOLF (saat ini ${players.length} pemain).`);
         return;
       }
 
-      // Randomize roles
-      const randomizedPlayers = randomizeRolesToPlayers(players, room.selectedRoles);
+      // 2. Mode 1: Exact count match required (no silent Villager padding)
+      if (mode === "MODE_1_FIXED") {
+        if (players.length !== room.targetPlayerCount) {
+          alert(`Mode 1 (Komposisi Tetap) memerlukan jumlah pemain (${players.length}) sama persis dengan total kartu peran terpilih (${room.targetPlayerCount}).`);
+          return;
+        }
+      }
+
+      // 3. Randomize / allocate roles based on mode
+      let randomizedPlayers: Player[];
+      try {
+        randomizedPlayers = randomizeRolesToPlayers(players, room.selectedRoles, mode);
+      } catch (err: any) {
+        alert(err?.message || "Gagal mengalokasikan peran.");
+        return;
+      }
 
       const updatedState = {
         phase: "CARD_REVEAL" as Phase,
@@ -415,7 +447,7 @@ export const useGameStore = create<GameStore>()((set, get) => {
           day: nightCount,
           phase: "NIGHT" as const,
           type: "elimination" as const,
-          text: `${killed.name} (${killed.canonical_name}) gugur di malam hari.`,
+          text: `${killed.name} gugur di malam hari.`,
           timestamp: Date.now(),
         });
       }
@@ -515,12 +547,12 @@ export const useGameStore = create<GameStore>()((set, get) => {
       let narrative = "";
 
       if (eliminatedPlayer) {
-        narrative = `⚖️ **HASIL VOTING WARGA**\n\nSetelah perdebatan sengit, warga desa telah memutuskan.\n\n**${eliminatedPlayer.name}** (${eliminatedPlayer.canonical_name}) dieksekusi oleh warga desa!\n\n`;
+        narrative = `⚖️ **HASIL VOTING WARGA**\n\nSetelah perdebatan sengit, warga desa telah memutuskan.\n\n**${eliminatedPlayer.name}** dieksekusi oleh warga desa!\n\n`;
         newLog.push({
           day: dayCount,
           phase: "DAY" as const,
           type: "elimination" as const,
-          text: `${eliminatedPlayer.name} (${eliminatedPlayer.canonical_name}) dieliminasi melalui voting warga.`,
+          text: `${eliminatedPlayer.name} dieliminasi melalui voting warga.`,
           timestamp: Date.now(),
         });
       } else {
