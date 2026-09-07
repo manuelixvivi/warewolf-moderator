@@ -6,6 +6,13 @@ export const metadata: Metadata = {
   description:
     "Game Werewolf online tanpa login. Pemilik room menentukan role & kuota, AI & Game Engine menjadi moderator otomatis.",
   keywords: ["werewolf", "aspire werewolf", "ai moderator", "game werewolf online", "one village many lies one wolf"],
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: "/apple-icon.png",
+  },
 };
 
 export default function RootLayout({

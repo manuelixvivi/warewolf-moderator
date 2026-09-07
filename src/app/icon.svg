@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2d0b4e"/>
+      <stop offset="65%" stop-color="#150524"/>
+      <stop offset="100%" stop-color="#07020d"/>
+    </radialGradient>
+
+    <!-- Crimson Blood Moon Aura -->
+    <radialGradient id="moonAura" cx="50%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#ff3366" stop-opacity="0.9"/>
+      <stop offset="45%" stop-color="#990033" stop-opacity="0.6"/>
+      <stop offset="85%" stop-color="#4a0022" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Moon Texture / Core -->
+    <linearGradient id="moonCore" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffe6eb"/>
+      <stop offset="35%" stop-color="#ff99bb"/>
+      <stop offset="80%" stop-color="#cc1144"/>
+      <stop offset="100%" stop-color="#660022"/>
+    </linearGradient>
+
+    <!-- Wolf Fur Gradient -->
+    <linearGradient id="wolfShade" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#3b1d5a"/>
+      <stop offset="40%" stop-color="#1d0a33"/>
+      <stop offset="100%" stop-color="#090214"/>
+    </linearGradient>
+
+    <!-- Wolf Highlights -->
+    <linearGradient id="wolfHighlight" x1="0%" y1="0%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#d946ef"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+
+    <!-- Glowing Eye Gradient -->
+    <radialGradient id="eyeGlow" cx="45%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="30%" stop-color="#fef08a"/>
+      <stop offset="70%" stop-color="#eab308"/>
+      <stop offset="100%" stop-color="#ca8a04"/>
+    </radialGradient>
+
+    <!-- Outer Rim Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="eyeFilter" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Circular Base Badge with Border -->
+  <circle cx="256" cy="256" r="248" fill="url(#bgGrad)"/>
+  <circle cx="256" cy="256" r="244" fill="none" stroke="#7e22ce" stroke-width="6" stroke-opacity="0.7"/>
+  <circle cx="256" cy="256" r="238" fill="none" stroke="#f43f5e" stroke-width="2" stroke-opacity="0.5"/>
+
+  <!-- Blood Moon Glowing Aura -->
+  <circle cx="256" cy="230" r="180" fill="url(#moonAura)"/>
+  <circle cx="256" cy="230" r="140" fill="url(#moonCore)" filter="url(#glow)" opacity="0.95"/>
+
+  <!-- Moon Craters / Shadows -->
+  <path d="M 290 150 Q 330 180 320 220 Q 300 250 260 250 Q 230 230 240 180 Z" fill="#99002b" opacity="0.35"/>
+  <circle cx="200" cy="180" r="25" fill="#800020" opacity="0.3"/>
+  <circle cx="330" cy="250" r="18" fill="#800020" opacity="0.25"/>
+
+  <!-- Stylized Howling Werewolf Silhouette with Angular Geometric Precision -->
+  <!-- Left/Center Head Profile -->
+  <path d="
+    M 256 90
+    L 295 165
+    L 270 195
+    L 350 255
+    L 395 240
+    L 410 270
+    L 345 320
+    L 375 365
+    L 325 390
+    L 350 440
+    L 290 430
+    L 270 470
+    L 230 460
+    L 210 475
+    L 180 435
+    L 155 445
+    L 165 395
+    L 125 375
+    L 155 330
+    L 100 270
+    L 115 240
+    L 165 255
+    L 245 195
+    L 220 165
+    Z
+  " fill="url(#wolfShade)" stroke="url(#wolfHighlight)" stroke-width="7" stroke-linejoin="round"/>
+
+  <!-- Wolf Head Inner Facets & Fur Tufts -->
+  <path d="M 256 120 L 275 180 L 237 180 Z" fill="#120422" opacity="0.8"/>
+  <path d="M 256 185 L 305 240 L 256 280 L 207 240 Z" fill="#090214"/>
+  
+  <!-- Snout & Fangs Downward / Frontal Menacing Stare -->
+  <path d="M 256 280 L 290 340 L 256 365 L 222 340 Z" fill="#1a062e" stroke="#ec4899" stroke-width="3"/>
+  <!-- Fangs -->
+  <polygon points="238,340 246,365 242,340" fill="#ffffff"/>
+  <polygon points="274,340 266,365 270,340" fill="#ffffff"/>
+
+  <!-- Piercing Glowing Amber Eyes -->
+  <!-- Left Eye -->
+  <polygon points="205,230 240,240 215,250" fill="url(#eyeGlow)" filter="url(#eyeFilter)"/>
+  <polygon points="212,234 233,241 218,247" fill="#ffffff"/>
+
+  <!-- Right Eye -->
+  <polygon points="307,230 272,240 297,250" fill="url(#eyeGlow)" filter="url(#eyeFilter)"/>
+  <polygon points="300,234 279,241 294,247" fill="#ffffff"/>
+
+  <!-- Forehead Rune / Moon Crest -->
+  <path d="M 256 200 L 263 218 L 256 226 L 249 218 Z" fill="#fbbf24" filter="url(#eyeFilter)"/>
+
+  <!-- Scratch Claw Accent Marks in Bottom Left & Right -->
+  <path d="M 95 380 L 140 430" stroke="#f43f5e" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 115 370 L 160 420" stroke="#f43f5e" stroke-width="8" stroke-linecap="round" opacity="0.85"/>
+  <path d="M 135 360 L 180 410" stroke="#f43f5e" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
+
+  <path d="M 417 380 L 372 430" stroke="#a855f7" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 397 370 L 352 420" stroke="#a855f7" stroke-width="8" stroke-linecap="round" opacity="0.85"/>
+  <path d="M 377 360 L 332 410" stroke="#a855f7" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
+</svg>
