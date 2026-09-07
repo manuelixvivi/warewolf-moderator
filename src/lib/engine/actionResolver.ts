@@ -11,7 +11,7 @@ import {
 } from "./types";
 import { resolveInvestigation } from "./investigationEngine";
 import { resolveDeathChain } from "./deathResolver";
-import { revealDrunkRole, transformPlayerRole } from "./roleTransformation";
+import { revealDrunkRole, transformPlayerRole, convertCursedToWerewolf } from "./roleTransformation";
 
 export interface NightResolutionContext {
   wolvesSkippingTonight?: boolean; // From Diseased infection on previous night
@@ -329,13 +329,8 @@ export function resolveNightActions(
         } else if (target.canonical_name === "Cursed" || target.isCursed || target.role_id === "ROLE-031") {
           // Cursed converts to Werewolf!
           const oldTeam = target.team;
-          playerMap.set(targetId, {
-            ...target,
-            team: "Werewolf",
-            category: "Werewolf",
-            seer_result: "Werewolf",
-            isCursed: false,
-          });
+          const converted = convertCursedToWerewolf(target);
+          playerMap.set(targetId, converted);
           outcome.convertedPlayerIds.push({
             playerId: targetId,
             oldTeam,

@@ -54,6 +54,7 @@ export function transformPlayerRole(
     role_id: targetRole.role_id,
     canonical_name: targetRole.canonical_name,
     team: targetRole.team,
+    originalTeam: targetRole.team,
     category: targetRole.category,
     seer_result: targetRole.seer_result,
     role_points: targetRole.role_points,
@@ -122,13 +123,27 @@ export function activateDoppelganger(
 
 /**
  * Handles Cursed conversion when attacked by Werewolves.
+ * Uses transformPlayerRole so the player fully transforms into a genuine Werewolf.
  */
 export function convertCursedToWerewolf(player: PlayerEngineState): PlayerEngineState {
+  const werewolfRole = getRoleByName("Werewolf") || getRoleById("ROLE-023");
+  if (!werewolfRole) {
+    return {
+      ...player,
+      team: "Werewolf",
+      originalTeam: "Werewolf",
+      category: "Werewolf",
+      seer_result: "Werewolf",
+      isCursed: false,
+    };
+  }
+  const { updatedPlayer } = transformPlayerRole(
+    player,
+    werewolfRole,
+    "Cursed transformed to Werewolf by attack"
+  );
   return {
-    ...player,
-    team: "Werewolf",
-    category: "Werewolf",
-    seer_result: "Werewolf",
+    ...updatedPlayer,
     isCursed: false,
   };
 }
@@ -181,6 +196,7 @@ export function switchAlexanderTeam(
   return {
     ...player,
     team: losingTeam,
+    originalTeam: losingTeam,
     category: losingTeam === "Werewolf" ? "Werewolf" : "Neutral",
     seer_result: losingTeam === "Werewolf" ? "Werewolf" : "Villager",
   };
