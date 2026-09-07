@@ -137,6 +137,16 @@ export interface WinResult {
   reason: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  channel: "DAY_PUBLIC" | "WOLF_SECRET" | "LOBBY" | "SYSTEM";
+  text: string;
+  timestamp: number;
+  isDead?: boolean;
+}
+
 export interface NetworkMessage {
   type:
     | "SYNC_STATE"
@@ -147,7 +157,8 @@ export interface NetworkMessage {
     | "SUBMIT_NIGHT_ACTION"
     | "SUBMIT_VOTE"
     | "TRIGGERED_ACTION"
-    | "RESTART_GAME";
+    | "RESTART_GAME"
+    | "SEND_CHAT";
   senderId: string;
   senderName?: string;
   payload?: any;
@@ -171,4 +182,5 @@ export interface GameState {
   winResult: WinResult | null;
   votes: Record<string, string>; // voterPlayerId -> targetPlayerId
   seerResultHistory: Record<string, { targetName: string; result: string }>;
+  chatMessages: ChatMessage[];
 }

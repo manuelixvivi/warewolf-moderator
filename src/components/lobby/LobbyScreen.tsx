@@ -3,6 +3,7 @@ import { useGameStore } from "@/store/gameStore";
 import { useState } from "react";
 import rolesJson from "@/data/roles.json";
 import { RoleData } from "@/types/game";
+import ChatBox from "@/components/chat/ChatBox";
 
 const ALL_ROLES = rolesJson as RoleData[];
 
@@ -182,6 +183,15 @@ export default function LobbyScreen() {
             </p>
           </div>
         )}
+
+        {/* Lobby Chat */}
+        <ChatBox
+          channel="LOBBY"
+          title="Obrolan Ruang Tunggu (Lobby Chat)"
+          subtitle="Sapa teman-temanmu selagi menunggu room full!"
+          placeholder="Ketik pesan untuk menyapa teman di lobby..."
+          maxHeight="h-44 sm:h-52"
+        />
 
         {/* Start Game Footer Action */}
         <div className="pt-2">

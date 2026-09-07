@@ -44,6 +44,7 @@ interface GameStore extends GameState {
   submitNightAction: (targetPlayerId: string | null) => void;
   castVote: (targetPlayerId: string | null) => void;
   setPlayerReady: () => void;
+  sendChatMessage: (text: string, channel?: "DAY_PUBLIC" | "WOLF_SECRET" | "LOBBY") => void;
 
   // Network sync handler
   handleIncomingNetworkMessage: (msg: NetworkMessage) => void;
@@ -94,6 +95,7 @@ const initialState: GameState = {
   winResult: null,
   votes: {},
   seerResultHistory: {},
+  chatMessages: [],
 };
 
 export const useGameStore = create<GameStore>()((set, get) => {
@@ -637,6 +639,39 @@ export const useGameStore = create<GameStore>()((set, get) => {
       });
     },
 
+    // ── Send Chat Message ─────────────────────────────────────
+    sendChatMessage: (text: string, channel = "DAY_PUBLIC") => {
+      const { myPlayerId, myPlayerName, players, room } = get();
+      const me = players.find((p) => p.id === myPlayerId);
+      const isHost = room && room.hostId === myPlayerId;
+
+      const chatMsg = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        senderId: myPlayerId,
+        senderName: myPlayerName || me?.name || "Pemain",
+        channel: channel as any,
+        text: text.trim(),
+        timestamp: Date.now(),
+        isDead: me ? !me.alive : false,
+      };
+
+      set((state) => ({ chatMessages: [...state.chatMessages, chatMsg] }));
+
+      if (isHost) {
+        network.broadcast({
+          type: "SEND_CHAT",
+          senderId: myPlayerId,
+          payload: chatMsg,
+        });
+      } else {
+        network.sendToHost({
+          type: "SEND_CHAT",
+          senderId: myPlayerId,
+          payload: chatMsg,
+        });
+      }
+    },
+
     // ── Handle Incoming Network Messages ───────────────────────
     handleIncomingNetworkMessage: (msg: NetworkMessage) => {
       const { myPlayerId, room, players } = get();
@@ -759,6 +794,27 @@ export const useGameStore = create<GameStore>()((set, get) => {
             senderId: myPlayerId,
             payload: { players: updatedPlayers },
           });
+          break;
+        }
+
+        case "SEND_CHAT": {
+          if (msg.payload) {
+            const newMsg = msg.payload;
+            if (!get().chatMessages.some((m) => m.id === newMsg.id)) {
+              set((state) => ({
+                chatMessages: [...state.chatMessages, newMsg],
+              }));
+
+              // If Host received from client, re-broadcast to all other peers!
+              if (isHost) {
+                network.broadcast({
+                  type: "SEND_CHAT",
+                  senderId: myPlayerId,
+                  payload: newMsg,
+                });
+              }
+            }
+          }
           break;
         }
 

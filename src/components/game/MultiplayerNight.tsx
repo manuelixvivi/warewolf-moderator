@@ -1,6 +1,7 @@
 "use client";
 import { useGameStore } from "@/store/gameStore";
 import { useState } from "react";
+import ChatBox from "@/components/chat/ChatBox";
 
 export default function MultiplayerNight() {
   const {
@@ -160,6 +161,15 @@ export default function MultiplayerNight() {
                 </div>
               )}
             </div>
+
+            {/* Secret Werewolf Chat */}
+            <ChatBox
+              channel="WOLF_SECRET"
+              title="Obrolan Rahasia Kawanan Serigala"
+              subtitle="Hanya kamu dan sesama serigala yang bisa membaca chat ini"
+              placeholder="Diskusikan korban mangsa bersama kawan serigala..."
+              maxHeight="h-48"
+            />
           </div>
         )}
 
