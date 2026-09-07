@@ -384,6 +384,8 @@ export function checkWinCondition(
     return {
       winner: res.winner,
       reason: res.reason,
+      winningPlayerIds: res.winningPlayerIds,
+      winningTeams: res.winningTeams,
     };
   }
   return null;

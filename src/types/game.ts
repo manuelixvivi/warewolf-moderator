@@ -136,6 +136,8 @@ export interface LogEntry {
 export interface WinResult {
   winner: string | null;
   reason: string;
+  winningPlayerIds?: string[];
+  winningTeams?: string[];
 }
 
 export interface ChatMessage {

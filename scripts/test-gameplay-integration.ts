@@ -232,10 +232,10 @@ console.log("\n--- FLOW 4: HOODLUM WIN CONDITION VALIDATION ---");
     deadTarget2,
   ]);
   assert(win !== null && win.winner === "Village", "[Flow 4] Primary winner is Village");
-  // Check that Hoodlum is enriched in winning outcome
+  // Check that Hoodlum is genuinely included in winningPlayerIds as a co-winner!
   assert(
-    Boolean(win !== null && win.reason.length > 0),
-    "[Flow 4] Hoodlum successfully meets win condition alongside living village survivors without needing sole survival"
+    Boolean(win?.winningPlayerIds?.includes("hood")),
+    "[Flow 4] Hoodlum is included among winning players (co-winner) alongside Village survivors"
   );
 }
 

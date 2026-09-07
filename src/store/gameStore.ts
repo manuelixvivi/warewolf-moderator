@@ -891,13 +891,46 @@ export const useGameStore = create<GameStore>()((set, get) => {
 
         case "SUBMIT_NIGHT_ACTION": {
           if (!isHost) return;
-          const { playerId, targetPlayerId, roleName } = msg.payload || {};
+          const { playerId, targetPlayerId } = msg.payload || {};
+          const senderId = msg.senderId;
+
+          // 1. Authoritative check: verify packet sender authenticity
+          if (!senderId || (playerId && senderId !== playerId)) {
+            console.warn(`[Authoritative Security] Night action rejected: senderId (${senderId}) does not match payload playerId (${playerId})`);
+            return;
+          }
+
+          // 2. Authoritative check: actor must exist and be alive
+          const actor = get().players.find((p) => p.id === senderId);
+          if (!actor || !actor.alive) {
+            console.warn(`[Authoritative Security] Night action rejected: actor (${senderId}) is dead or invalid`);
+            return;
+          }
+
+          // 3. Authoritative check: verify target player exists in room
+          if (targetPlayerId) {
+            const target = get().players.find((p) => p.id === targetPlayerId);
+            if (!target) {
+              console.warn(`[Authoritative Security] Night action rejected: target (${targetPlayerId}) does not exist`);
+              return;
+            }
+          }
+
+          // 4. Authoritative check: action authorization (sender MUST be in a.player_ids)
+          // Client-supplied roleName is NEVER trusted directly.
+          let authorized = false;
           const updatedNightActions = get().nightActions.map((a) => {
-            if (a.player_ids.includes(playerId) || a.role_name === roleName) {
+            if (a.player_ids.includes(senderId)) {
+              authorized = true;
               return { ...a, target_player_id: targetPlayerId, completed: true };
             }
             return a;
           });
+
+          if (!authorized) {
+            console.warn(`[Authoritative Security] Night action rejected: player (${senderId}) is not assigned to any active night action`);
+            return;
+          }
 
           set({ nightActions: updatedNightActions });
           network.broadcast({
@@ -911,7 +944,31 @@ export const useGameStore = create<GameStore>()((set, get) => {
         case "SUBMIT_VOTE": {
           if (!isHost) return;
           const { voterId, targetId } = msg.payload || {};
-          const updatedVotes = { ...get().votes, [voterId]: targetId };
+          const senderId = msg.senderId;
+
+          // 1. Authoritative check: verify packet sender authenticity
+          if (!senderId || (voterId && senderId !== voterId)) {
+            console.warn(`[Authoritative Security] Vote rejected: senderId (${senderId}) does not match voterId (${voterId})`);
+            return;
+          }
+
+          // 2. Authoritative check: voter must exist, be alive, and not be silenced
+          const voter = get().players.find((p) => p.id === senderId);
+          if (!voter || !voter.alive || voter.silenced) {
+            console.warn(`[Authoritative Security] Vote rejected: voter (${senderId}) is dead, silenced, or invalid`);
+            return;
+          }
+
+          // 3. Authoritative check: target must be 'SKIP' or an alive player
+          if (targetId && targetId !== "SKIP") {
+            const target = get().players.find((p) => p.id === targetId);
+            if (!target || !target.alive) {
+              console.warn(`[Authoritative Security] Vote rejected: target (${targetId}) is not an alive player`);
+              return;
+            }
+          }
+
+          const updatedVotes = { ...get().votes, [senderId]: targetId };
           set({ votes: updatedVotes });
           network.broadcast({
             type: "SYNC_STATE",
@@ -924,8 +981,16 @@ export const useGameStore = create<GameStore>()((set, get) => {
         case "TOGGLE_READY": {
           if (!isHost) return;
           const { playerId, isReady } = msg.payload || {};
+          const senderId = msg.senderId;
+
+          // Authoritative check: sender can only toggle their own ready state
+          if (!senderId || (playerId && senderId !== playerId)) {
+            console.warn(`[Authoritative Security] Toggle ready rejected: senderId mismatch`);
+            return;
+          }
+
           const updatedPlayers = get().players.map((p) =>
-            p.id === playerId ? { ...p, isReady } : p
+            p.id === senderId ? { ...p, isReady } : p
           );
           set({ players: updatedPlayers });
           network.broadcast({
