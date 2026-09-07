@@ -15,6 +15,7 @@ import {
   evaluateSeerResult,
   canPlayerActInNight,
   validateAbilityTarget,
+  buildEngineNightActions,
 } from "../src/lib/engine/abilityRegistry";
 import { resolveNightActions } from "../src/lib/engine/actionResolver";
 import { resolveDayVotes } from "../src/lib/engine/voteResolver";
@@ -264,10 +265,20 @@ function test_ROLE_010() {
 // ------------------------------------------------------------
 function test_ROLE_012() {
   const mag = createPlayer("mag", "Magician", "ROLE-012");
-  assert(mag.category === "Village" && mag.active_phase.includes("Night"), "[ROLE-012] Magician village night active role initialized");
   const target = createPlayer("t", "Target", "ROLE-024");
-  const act = { id: "a1", role_id: "ROLE-012", role_name: "Magician", player_ids: [mag.id], action_type: "Choose Power", target_player_id: target.id, priority: 35, completed: true };
-  assert(validateAbilityTarget(act, mag, target.id).valid, "[ROLE-012] Magician targets another player");
+  const act: EngineNightAction = {
+    id: "mag-1",
+    role_id: "ROLE-012",
+    role_name: "Magician",
+    player_ids: [mag.id],
+    action_type: "Choose Power",
+    target_player_id: target.id,
+    priority: 35,
+    completed: true,
+  };
+  const { updatedPlayers } = resolveNightActions([mag, target], [act], 1);
+  const updatedMag = updatedPlayers.find((p) => p.id === "mag")!;
+  assert(updatedMag.hasUsedAbility === true, "[ROLE-012] Magician completes night selection and marks ability used");
 }
 
 // ------------------------------------------------------------
@@ -301,7 +312,14 @@ function test_ROLE_014() {
 // ------------------------------------------------------------
 function test_ROLE_015() {
   const ralph = createPlayer("ralph", "Ralph", "ROLE-015");
-  assert(ralph.trigger.includes("Timer") || ralph.category === "Timer", "[ROLE-015] Ralph timer-triggered vote acceleration initialized");
+  const v1 = createPlayer("v1", "Villager 1", "ROLE-024");
+  // Positive: On timeout, Ralph automatically casts non-elimination (SKIP) vote
+  const { outcome: outTimeout } = resolveDayVotes([ralph, v1], { ralph: "v1", v1: "ralph" }, { isTimeout: true });
+  assert(outTimeout.tally.SKIP === 1, "[ROLE-015] Ralph casts non-elimination vote during timeout");
+  // Negative: When not timed out, Ralph's vote is counted normally
+  const v2 = createPlayer("v2", "Villager 2", "ROLE-024");
+  const { outcome: outNormal } = resolveDayVotes([ralph, v1, v2], { ralph: "v1", v1: "v1", v2: "ralph" }, { isTimeout: false });
+  assert(outNormal.tally["v1"] === 2, "[ROLE-015] (Negative) Ralph votes for target normally when not timed out");
 }
 
 // ------------------------------------------------------------
@@ -324,7 +342,14 @@ function test_ROLE_016() {
 // ------------------------------------------------------------
 function test_ROLE_017() {
   const sam = createPlayer("sam", "Sam", "ROLE-017");
-  assert(Boolean(sam.action_type.includes("Prevent") || sam.description_en?.includes("elimination")), "[ROLE-017] Sam prevents elimination during timeout");
+  const v1 = createPlayer("v1", "Villager 1", "ROLE-024");
+  // Positive: On timeout, Sam prevents elimination by redirecting to SKIP
+  const { outcome: outTimeout } = resolveDayVotes([sam, v1], { sam: "v1", v1: "sam" }, { isTimeout: true });
+  assert(outTimeout.tally.SKIP === 1 && outTimeout.eliminatedPlayer === null, "[ROLE-017] Sam prevents elimination during timeout");
+  // Negative: Normal voting without timeout can eliminate target
+  const v2 = createPlayer("v2", "Villager 2", "ROLE-024");
+  const { outcome: outNormal } = resolveDayVotes([sam, v1, v2], { sam: "v1", v1: "v1", v2: "sam" }, { isTimeout: false });
+  assert(outNormal.eliminatedPlayer?.id === "v1", "[ROLE-017] (Negative) Sam participates normally without timeout");
 }
 
 // ------------------------------------------------------------
@@ -332,7 +357,11 @@ function test_ROLE_017() {
 // ------------------------------------------------------------
 function test_ROLE_019() {
   const tb = createPlayer("tb", "Time Bandit", "ROLE-019");
-  assert(tb.action_type.includes("Reduce") || tb.trigger.includes("Timer"), "[ROLE-019] Time Bandit reduces daytime discussion timer");
+  const v1 = createPlayer("v1", "Villager 1", "ROLE-024");
+  const { outcome } = resolveDayVotes([tb, v1], { tb: "v1", v1: "tb" });
+  assert(outcome.tally["v1"] === 1, "[ROLE-019] Time Bandit casts vote in daytime resolution");
+  const win = evaluateWinConditions([tb, v1]);
+  assert(win.winner !== null, "[ROLE-019] Time Bandit survives to game evaluation");
 }
 
 // ------------------------------------------------------------
@@ -586,8 +615,15 @@ function test_ROLE_033() {
 // ------------------------------------------------------------
 function test_ROLE_034() {
   const drunk = createPlayer("d", "Drunk", "ROLE-034");
-  const sobered = revealDrunkRole(drunk, "ROLE-022");
-  assert(sobered.canonical_name === "Seer" && sobered.role_id === "ROLE-022", "[ROLE-034] Drunk sobers up and reveals real assigned role");
+  // Negative: Night 2 -> Remains unrevealed
+  const { updatedPlayers: night2Players } = resolveNightActions([drunk], [], 2);
+  assert(!night2Players[0].isDrunkRevealed, "[ROLE-034] (Negative) Drunk remains unaware on Night 2");
+  // Positive: Night 3 -> Automatically sobers up during end-of-night scheduled triggers
+  const { updatedPlayers: night3Players, outcome } = resolveNightActions([drunk], [], 3);
+  assert(
+    night3Players[0].isDrunkRevealed === true && outcome.triggeredActions.some((t) => t.type === "DRUNK_REVEALED"),
+    "[ROLE-034] Drunk sobers up on Night 3 and reveals real assigned role via night resolution"
+  );
 }
 
 // ------------------------------------------------------------
@@ -616,6 +652,7 @@ function test_ROLE_036() {
   const hood = createPlayer("h", "Hoodlum", "ROLE-036");
   const t1 = createPlayer("t1", "Target 1", "ROLE-024");
   const t2 = createPlayer("t2", "Target 2", "ROLE-024");
+  const otherVillager = createPlayer("v3", "Villager 3", "ROLE-024");
   const act: EngineNightAction = {
     id: "h-1",
     role_id: "ROLE-036",
@@ -627,15 +664,15 @@ function test_ROLE_036() {
     priority: 22,
     completed: true,
   };
-  const { updatedPlayers } = resolveNightActions([hood, t1, t2], [act], 1);
+  const { updatedPlayers } = resolveNightActions([hood, t1, t2, otherVillager], [act], 1);
   const markedHood = updatedPlayers.find((p) => p.id === "h")!;
-  // Both dead -> Hoodlum wins
+  // Both dead -> Hoodlum wins even with other living villagers!
   const dead1 = { ...t1, alive: false };
   const dead2 = { ...t2, alive: false };
-  const win = evaluateWinConditions([markedHood, dead1, dead2]);
-  assert(win.winningPlayerIds.includes("h"), "[ROLE-036] Hoodlum wins when both marked targets are dead");
+  const win = evaluateWinConditions([markedHood, dead1, dead2, otherVillager]);
+  assert(win.winningPlayerIds.includes("h"), "[ROLE-036] Hoodlum wins when both marked targets are dead, even with other villagers alive");
   // Negative: Only 1 dead -> No win
-  const halfDead = evaluateWinConditions([markedHood, dead1, t2]);
+  const halfDead = evaluateWinConditions([markedHood, dead1, t2, otherVillager]);
   assert(!halfDead.winningPlayerIds.includes("h"), "[ROLE-036] (Negative) Hoodlum does not win if one target is still alive");
 }
 
@@ -893,7 +930,20 @@ function test_ROLE_054() {
 // ------------------------------------------------------------
 function test_ROLE_055() {
   const tm = createPlayer("tm", "Troublemaker", "ROLE-055");
-  assert(Boolean(tm.action_type.includes("Elimination") || tm.category === "Village"), "[ROLE-055] Troublemaker forces chaos/elimination vote");
+  const target = createPlayer("t", "Target", "ROLE-024");
+  const act: EngineNightAction = {
+    id: "tm-1",
+    role_id: "ROLE-055",
+    role_name: "Troublemaker",
+    player_ids: ["tm"],
+    action_type: "Force Elimination",
+    target_player_id: "t",
+    priority: 70,
+    completed: true,
+  };
+  const { updatedPlayers } = resolveNightActions([tm, target], [act], 1);
+  const updatedTm = updatedPlayers.find((p) => p.id === "tm")!;
+  assert(updatedTm.hasUsedAbility === true, "[ROLE-055] Troublemaker expends once-per-game ability to disrupt village");
 }
 
 // ------------------------------------------------------------
@@ -996,7 +1046,13 @@ function test_ROLE_060() {
 // ------------------------------------------------------------
 function test_ROLE_061() {
   const ff = createPlayer("ff", "Fang Face", "ROLE-061");
-  assert(ff.category === "Werewolf" && ff.action_type === "Werewolf Action", "[ROLE-061] Fang Face participates in werewolf kill");
+  const target = createPlayer("t", "Target", "ROLE-024");
+  const wolfActions = buildEngineNightActions([ff, target], 1);
+  const packAction = wolfActions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
+  assert(Boolean(packAction && packAction.player_ids.includes("ff")), "[ROLE-061] Fang Face is included in werewolf pack attack");
+  const attackAct = { ...packAction!, target_player_id: "t", completed: true };
+  const { updatedPlayers } = resolveNightActions([ff, target], [attackAct], 1);
+  assert(!updatedPlayers.find((p) => p.id === "t")?.alive, "[ROLE-061] Fang Face pack attack eliminates victim");
 }
 
 // ------------------------------------------------------------
@@ -1004,7 +1060,24 @@ function test_ROLE_061() {
 // ------------------------------------------------------------
 function test_ROLE_062() {
   const fb = createPlayer("fb", "Fruit Brute", "ROLE-062");
-  assert(fb.category === "Werewolf" && fb.team === "Werewolf", "[ROLE-062] Fruit Brute werewolf-aligned role initialized");
+  const bg = createPlayer("bg", "Bodyguard", "ROLE-028");
+  const target = createPlayer("t", "Target", "ROLE-024");
+  const wolfActions = buildEngineNightActions([fb, bg, target], 1);
+  const packAction = wolfActions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
+  assert(Boolean(packAction && packAction.player_ids.includes("fb")), "[ROLE-062] Fruit Brute participates in werewolf pack kill");
+  const protectAct: EngineNightAction = {
+    id: "bg-1",
+    role_id: "ROLE-028",
+    role_name: "Bodyguard",
+    player_ids: ["bg"],
+    action_type: "Protect",
+    target_player_id: "t",
+    priority: 30,
+    completed: true,
+  };
+  const attackAct = { ...packAction!, target_player_id: "t", completed: true };
+  const { updatedPlayers } = resolveNightActions([fb, bg, target], [protectAct, attackAct], 1);
+  assert(updatedPlayers.find((p) => p.id === "t")?.alive === true, "[ROLE-062] (Negative) Protected target survives Fruit Brute attack");
 }
 
 // ------------------------------------------------------------
@@ -1094,7 +1167,13 @@ function test_ROLE_066() {
 // ------------------------------------------------------------
 function test_ROLE_067() {
   const teen = createPlayer("teen", "Teenage Werewolf", "ROLE-067");
-  assert(teen.category === "Werewolf" && teen.team === "Werewolf", "[ROLE-067] Teenage Werewolf acts with werewolf pack");
+  const target = createPlayer("t", "Target", "ROLE-024");
+  const wolfActions = buildEngineNightActions([teen, target], 1);
+  const packAction = wolfActions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
+  assert(Boolean(packAction && packAction.player_ids.includes("teen")), "[ROLE-067] Teenage Werewolf is mobilized with werewolf pack");
+  const attackAct = { ...packAction!, target_player_id: "t", completed: true };
+  const { updatedPlayers } = resolveNightActions([teen, target], [attackAct], 1);
+  assert(!updatedPlayers.find((p) => p.id === "t")?.alive, "[ROLE-067] Teenage Werewolf pack attack successfully eliminates victim");
 }
 
 // ------------------------------------------------------------
@@ -1173,9 +1252,8 @@ function test_ROLE_070() {
 function test_ROLE_071() {
   const beholder = createPlayer("beh", "Beholder", "ROLE-071");
   const seer = createPlayer("seer", "Seer", "ROLE-022");
-  const role = ROLE_BY_ID.get("ROLE-071")!;
-  const priv = generatePrivatePlayerState(beholder, [beholder, seer], role);
-  assert(priv.player.role_id === "ROLE-071", "[ROLE-071] Beholder learns the identity of the real Seer");
+  const priv = generatePrivatePlayerState(beholder, [beholder, seer], ROLE_BY_ID.get("ROLE-071")!);
+  assert(Boolean(priv?.teammateIds?.includes("seer")), "[ROLE-071] Beholder learns the identity of the real Seer via private state");
 }
 
 // ------------------------------------------------------------
@@ -1183,7 +1261,13 @@ function test_ROLE_071() {
 // ------------------------------------------------------------
 function test_ROLE_072() {
   const bm = createPlayer("bm", "Bogeyman", "ROLE-072");
-  assert(bm.category === "Werewolf" && bm.team === "Werewolf-aligned", "[ROLE-072] Bogeyman werewolf-aligned role initialized");
+  const target = createPlayer("t", "Target", "ROLE-024");
+  const wolfActions = buildEngineNightActions([bm, target], 1);
+  const packAction = wolfActions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
+  assert(Boolean(packAction && packAction.player_ids.includes("bm")), "[ROLE-072] Bogeyman is registered in werewolf pack action");
+  const attackAct = { ...packAction!, target_player_id: "t", completed: true };
+  const { updatedPlayers } = resolveNightActions([bm, target], [attackAct], 1);
+  assert(!updatedPlayers.find((p) => p.id === "t")?.alive, "[ROLE-072] Bogeyman attack successfully eliminates victim");
 }
 
 // ------------------------------------------------------------

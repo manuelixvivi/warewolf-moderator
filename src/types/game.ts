@@ -187,4 +187,5 @@ export interface GameState {
   votes: Record<string, string>; // voterPlayerId -> targetPlayerId
   seerResultHistory: Record<string, { targetName: string; result: string }>;
   chatMessages: ChatMessage[];
+  timeoutCount: number;
 }

@@ -42,7 +42,7 @@ interface GameStore extends GameState {
   proceedToNight: () => void;
   proceedToVoting: () => void;
   resolveNightPhase: () => void;
-  resolveDayVotingPhase: () => void;
+  resolveDayVotingPhase: (isTimeout?: boolean) => void;
   resolveTriggeredAction: (type: string, targetId?: string) => void;
   restartGame: () => void;
 
@@ -68,20 +68,22 @@ function generateRoomCode(): string {
 
 // Generate random player ID
 function generatePlayerId(): string {
-  return `p_${Math.random().toString(36).substring(2, 9)}`;
+  if (typeof window !== "undefined") {
+    let id = sessionStorage.getItem("aspire_player_id");
+    if (!id) {
+      id = "p-" + Math.random().toString(36).substring(2, 9);
+      sessionStorage.setItem("aspire_player_id", id);
+    }
+    return id;
+  }
+  return "p-" + Math.random().toString(36).substring(2, 9);
 }
 
-const initialPlayerId = typeof window !== "undefined"
-  ? sessionStorage.getItem("aspire_player_id") || generatePlayerId()
-  : generatePlayerId();
-
-const initialPlayerName = typeof window !== "undefined"
-  ? localStorage.getItem("aspire_player_name") || ""
-  : "";
-
-if (typeof window !== "undefined") {
-  sessionStorage.setItem("aspire_player_id", initialPlayerId);
-}
+const initialPlayerId = generatePlayerId();
+const initialPlayerName =
+  typeof window !== "undefined"
+    ? localStorage.getItem("aspire_player_name") || ""
+    : "";
 
 const initialState: GameState = {
   mode: "MULTIPLAYER",
@@ -102,6 +104,7 @@ const initialState: GameState = {
   votes: {},
   seerResultHistory: {},
   chatMessages: [],
+  timeoutCount: 0,
 };
 
 export const useGameStore = create<GameStore>()((set, get) => {
@@ -561,11 +564,16 @@ export const useGameStore = create<GameStore>()((set, get) => {
     },
 
     // ── Resolve Day Voting (Host only) ─────────────────────────
-    resolveDayVotingPhase: () => {
-      const { players, votes, dayCount, room, myPlayerId } = get();
+    resolveDayVotingPhase: (isTimeout?: boolean) => {
+      const { players, votes, dayCount, room, myPlayerId, timeoutCount = 0 } = get();
       if (!room || myPlayerId !== room.hostId) return;
 
-      const { updatedPlayers, eliminatedPlayer, tally, triggered } = resolveDayVotes(players, votes);
+      const newTimeoutCount = isTimeout ? timeoutCount + 1 : timeoutCount;
+      const { updatedPlayers, eliminatedPlayer, tally, triggered } = resolveDayVotes(
+        players,
+        votes,
+        { isTimeout: !!isTimeout, dayCount }
+      );
 
       const newLog = [...get().gameLog];
       let narrative = "";
@@ -580,16 +588,17 @@ export const useGameStore = create<GameStore>()((set, get) => {
           timestamp: Date.now(),
         });
       } else {
-        narrative = `⚖️ **HASIL VOTING WARGA**\n\nVoting berakhir seri atau tidak ada suara yang cukup. Tidak ada warga yang dieksekusi hari ini!\n\n`;
+        narrative = `⚖️ **HASIL VOTING WARGA**\n\n${isTimeout ? "Waktu habis (Timeout)! " : ""}Voting berakhir tanpa eliminasi hari ini!\n\n`;
       }
 
-      // Check win condition
-      const win = checkWinCondition(updatedPlayers);
+      // Check win condition (with timeoutCount for Father Time ROLE-007)
+      const win = checkWinCondition(updatedPlayers, { timeoutCount: newTimeoutCount });
       const nextPhase: Phase = win ? "GAME_OVER" : "DAY_NARRATIVE";
 
       const updatedState = {
         phase: nextPhase,
         players: updatedPlayers,
+        timeoutCount: newTimeoutCount,
         triggeredActions: triggered,
         activeTriggeredAction: triggered.find((t) => !t.completed) || null,
         currentNarrative: narrative,

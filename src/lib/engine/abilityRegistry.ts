@@ -145,7 +145,7 @@ export function buildEngineNightActions(
     // Standard Werewolf pack attack
     actions.push({
       id: `night-${nightCount}-werewolves-primary`,
-      role_id: "ROLE-068",
+      role_id: "SYSTEM-WEREWOLF-PACK",
       role_name: "Werewolves",
       player_ids: aliveWerewolves.map((w) => w.id),
       action_type: "Werewolf Action",
@@ -158,12 +158,12 @@ export function buildEngineNightActions(
     if (wolfCubExtraKillActive) {
       actions.push({
         id: `night-${nightCount}-werewolves-extra-cub`,
-        role_id: "ROLE-022",
+        role_id: "SYSTEM-WEREWOLF-PACK-RAGE",
         role_name: "Werewolves (Wolf Cub Rage)",
         player_ids: aliveWerewolves.map((w) => w.id),
         action_type: "Extra Kill",
         target_player_id: null,
-        priority: 52,
+        priority: 51,
         completed: false,
       });
     }

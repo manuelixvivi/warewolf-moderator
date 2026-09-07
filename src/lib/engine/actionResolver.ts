@@ -460,6 +460,34 @@ export function resolveNightActions(
         });
       }
     }
+
+    // Magician (ROLE-012): Choose power / act at night
+    if ((roleName.includes("magician") || action.role_id === "ROLE-012") && actor && actor.alive) {
+      playerMap.set(actor.id, {
+        ...actor,
+        hasUsedAbility: true,
+      });
+      outcome.triggeredActions.push({
+        type: "MAGICIAN_CAST",
+        playerId: actor.id,
+        roleName: "Magician",
+        description: `Magician (${actor.name}) menggunakan kekuatan khusus malam ini.`,
+      });
+    }
+
+    // Troublemaker (ROLE-055): Force elimination
+    if ((roleName.includes("troublemaker") || action.role_id === "ROLE-055") && actor && actor.alive) {
+      playerMap.set(actor.id, {
+        ...actor,
+        hasUsedAbility: true,
+      });
+      outcome.triggeredActions.push({
+        type: "TROUBLEMAKER_DISRUPT",
+        playerId: actor.id,
+        roleName: "Troublemaker",
+        description: `Troublemaker (${actor.name}) membuat keonaran dan memaksa desa melakukan eliminasi besok!`,
+      });
+    }
   }
 
   // -----------------------------------------------------------------

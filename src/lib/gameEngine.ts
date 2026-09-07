@@ -313,7 +313,8 @@ export function getSeerResult(player: Player): "Werewolf" | "Villager" {
 // ── 5. Voting Resolution ────────────────────────────────────────────
 export function resolveDayVotes(
   players: Player[],
-  votes: Record<string, string> // voterId -> targetId
+  votes: Record<string, string>, // voterId -> targetId
+  options?: { isTimeout?: boolean; dayCount?: number; martyrSwapId?: string }
 ): {
   updatedPlayers: Player[];
   eliminatedPlayer: Player | null;
@@ -324,7 +325,8 @@ export function resolveDayVotes(
 
   const { updatedPlayers: engineUpdated, outcome } = engineResolveDayVotes(
     enginePlayers,
-    votes
+    votes,
+    options
   );
 
   const updatedPlayers: Player[] = engineUpdated.map((ep) => {
@@ -372,29 +374,12 @@ export function resolveDayVotes(
 }
 
 // ── 6. Check Win Condition ──────────────────────────────────────────
-export function checkWinCondition(players: Player[]): WinResult | null {
-  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
-    ...p,
-    role_id: p.role_id || "ROLE-066",
-    canonical_name: p.canonical_name || "Villager",
-    team: p.team || "Village",
-    originalTeam: p.team || "Village",
-    category: p.category || "Village",
-    seer_result: p.seer_result || "Villager",
-    role_points: 1,
-    balance_weight: 0,
-    night_priority: p.night_priority || 50,
-    active_phase: p.active_phase || "None",
-    action_type: p.action_type || "None",
-    trigger: "",
-    target_type: p.target_type || "None",
-    usage_limit: p.usage_limit || "Passive",
-    can_change_role: p.can_change_role || false,
-    isCursed: false,
-    usedAbilityCount: 0,
-  }));
-
-  const res = evaluateWinConditions(enginePlayers);
+export function checkWinCondition(
+  players: Player[],
+  options?: { timeoutCount?: number }
+): WinResult | null {
+  const enginePlayers: PlayerEngineState[] = players.map(playerToEngineState);
+  const res = evaluateWinConditions(enginePlayers, options);
   if (res.hasWon && res.winner) {
     return {
       winner: res.winner,

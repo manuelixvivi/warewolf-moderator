@@ -112,6 +112,24 @@ export function generatePrivatePlayerState(
       .map((p) => p.id);
   }
 
+  // Beholder (ROLE-071) sees the real Seer
+  if (player.role_id === "ROLE-071" || player.canonical_name === "Beholder") {
+    const seer = allPlayers.find((p) => p.role_id === "ROLE-022" || p.canonical_name === "Seer");
+    if (seer && !teammateIds.includes(seer.id)) {
+      teammateIds.push(seer.id);
+    }
+  }
+
+  // Minion (ROLE-045) sees Werewolves
+  if (player.role_id === "ROLE-045" || player.canonical_name === "Minion") {
+    const wolves = allPlayers.filter((p) => p.team === "Werewolf" || p.category === "Werewolf");
+    for (const w of wolves) {
+      if (!teammateIds.includes(w.id)) {
+        teammateIds.push(w.id);
+      }
+    }
+  }
+
   return {
     player: { ...player },
     roleData,

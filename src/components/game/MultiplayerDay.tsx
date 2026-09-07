@@ -41,13 +41,16 @@ export default function MultiplayerDay() {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
+          if (isHost) {
+            resolveDayVotingPhase(true);
+          }
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [phase, timerRunning]);
+  }, [phase, timerRunning, isHost, resolveDayVotingPhase]);
 
   // Compute vote tallies
   const voteTallies: Record<string, number> = {};
@@ -267,7 +270,7 @@ export default function MultiplayerDay() {
                   <div className="pt-4 border-t border-gray-800 space-y-3">
                     <button
                       type="button"
-                      onClick={resolveDayVotingPhase}
+                      onClick={() => resolveDayVotingPhase(false)}
                       className="w-full py-4 bg-gradient-to-r from-red-700 via-red-600 to-rose-700 hover:from-red-600 hover:to-rose-600 text-white font-black text-lg rounded-2xl shadow-xl shadow-red-950 transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>⚖️</span> SELESAIKAN VOTING & EKSEKUSI HASIL

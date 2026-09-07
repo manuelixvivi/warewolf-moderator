@@ -134,6 +134,17 @@ export function buildPrivatePlayerState(
     }
   }
 
+  // Beholder (ROLE-071) sees the real Seer
+  if (player.canonical_name === "Beholder" || player.role_id === "ROLE-071") {
+    for (const other of allPlayers) {
+      if (other.canonical_name === "Seer" || other.role_id === "ROLE-022") {
+        if (!teammateIds.includes(other.id)) {
+          teammateIds.push(other.id);
+        }
+      }
+    }
+  }
+
   return {
     player,
     roleData,

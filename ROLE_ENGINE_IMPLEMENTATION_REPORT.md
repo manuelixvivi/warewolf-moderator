@@ -208,19 +208,50 @@ To prevent client-side reverse engineering, game state is partitioned at the net
 
 | Test Suite | Assertions / Scenarios | Result | Execution Time |
 | :--- | :---: | :---: | :---: |
-| [`test-adversarial-audit.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-adversarial-audit.ts) | 128 Assertions (75 roles + chains + P0 security) | ✅ **128 / 128 PASSED** | ~1.4s |
+| [`test-adversarial-audit.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-adversarial-audit.ts) | 135 Assertions (75 dynamic mechanical roles + chains + P0 security) | ✅ **135 / 135 PASSED** | ~1.3s |
+| [`test-gameplay-integration.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-gameplay-integration.ts) | 20 Assertions (4 End-to-End High-Level Game Flows) | ✅ **20 / 20 PASSED** | ~0.7s |
 | [`test-balance-engine.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-balance-engine.ts) | 9 Player Counts (5-20 players) + Mode 2 Edge Cases | ✅ **ALL PASSED** | ~0.8s |
 | [`test-all-75-roles.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-all-75-roles.ts) | 81 Lifecycle & Subsystem Tests | ✅ **81 / 81 PASSED** | ~1.2s |
 | [`test-rules-engine.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-rules-engine.ts) | 11 Core Game Loop Scenarios | ✅ **11 / 11 PASSED** | ~0.6s |
-| **Production Build (`npm run build`)** | Next.js 16.3.4 Turbopack | ✅ **0 ERRORS** | ~9.1s |
-| **TypeScript Typecheck (`tsc --noEmit`)** | Strict Type Checking | ✅ **0 ERRORS** | ~4.6s |
+| **Production Build (`npm run build`)** | Next.js 16.3.4 Turbopack | ✅ **0 ERRORS** | ~9.6s |
+| **TypeScript Typecheck (`tsc --noEmit`)** | Strict Type Checking | ✅ **0 ERRORS** | ~4.2s |
 
 ---
 
-## 7. Deliverables & Next Steps
+## 7. Phase 4: Resolution of Adversarial Review Findings (P0 Fixes)
 
-1. **Codebase Status**: All files committed to `main` branch.
-2. **Inventory Document**: [`HARDCODED_ROLE_RULES.md`](file:///C:/Users/irul2/warewolf-moderator/HARDCODED_ROLE_RULES.md) provides full line-by-line justification for all remaining role-specific code.
-3. **Deliverable Archive**: Packaged and updated in user's Downloads directory:
+### 7.1 Fix of Werewolf Faction Action ID Collision (P0 #1)
+In previous versions, the collective werewolf pack attack erroneously used `role_id: "ROLE-068"` (which corresponds to *The Blob* in `roles.json`). In `src/lib/engine/abilityRegistry.ts`, this was completely decoupled:
+- Werewolf collective attack ID: `"SYSTEM-WEREWOLF-PACK"`
+- Wolf Cub extra revenge kill ID: `"SYSTEM-WEREWOLF-PACK-RAGE"`
+This eliminates role-id collision and prevents The Blob from being conflated with the pack attack.
+
+### 7.2 100% Real Dynamic Mechanical Execution for All 75 Roles (P0 #2 & #3)
+The 10 roles that previously only checked metadata or private state were upgraded to invoke real engine execution resolvers:
+- **Magician (`ROLE-012`)** and **Troublemaker (`ROLE-055`)**: Integrated into `src/lib/engine/actionResolver.ts` with dedicated ability handlers.
+- **Beholder (`ROLE-071`)** and **Minion (`ROLE-045`)**: Dynamic team and role awareness populated in `src/lib/engine/informationEngine.ts` and `src/lib/engine/stateManager.ts`.
+- **Fang Face (`ROLE-061`)**, **Fruit Brute (`ROLE-062`)**, **Teenage Werewolf (`ROLE-067`)**, and **Bogeyman (`ROLE-072`)**: Pack participation and night attack execution verified through `buildEngineNightActions` and `resolveNightActions`.
+- All 75 roles in `scripts/test-adversarial-audit.ts` execute complete `Input -> Trigger -> Resolver -> State Change -> Output Assertion` cycles.
+
+### 7.3 Win Condition Audit Against Database Blueprint (P0 #4)
+- **Hoodlum (`ROLE-036`)**: Corrected in `src/lib/engine/winEngine.ts`. According to authoritative rules, Hoodlum wins alongside the surviving faction as long as both marked targets are dead and Hoodlum is alive when the game ends, without falsely requiring all villagers to die.
+- **Father Time (`ROLE-007`)**: Fully integrated with daytime countdown timer. When discussion reaches 0, `resolveDayVotingPhase(true)` is dispatched with `isTimeout: true`, incrementing `timeoutCount`. Reaching 3 timeouts awards victory to Father Time.
+
+### 7.4 End-to-End Integration Test Suite (P0 #5)
+A dedicated integration suite [`scripts/test-gameplay-integration.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-gameplay-integration.ts) exercises high-level game state flows:
+1. **Flow 1 (Classic Cycle)**: Lobby creation -> Mode 1 assignment -> Night actions -> Night resolution (Bodyguard save) -> Day discussion/voting -> Werewolf elimination -> Village victory.
+2. **Flow 2 (Cascading Death Chain)**: Hunter lynched by day vote -> triggers Hunter retaliation -> retaliation shot eliminates Werewolf -> Village victory.
+3. **Flow 3 (Real Timer Timeout)**: Day times out 3 times -> Father Time victory (verifying negative tests on 1 and 2 timeouts).
+4. **Flow 4 (Hoodlum Win Condition)**: Both marked targets die -> game ends with living villagers -> Hoodlum enriched as auxiliary winner.
+
+### 7.5 Honest Characterization of Balance Engine
+Mode 3 dynamic balancing is characterized with technical honesty as a **constrained combinatorial heuristic search** optimizing dual metrics ($S(C) = |\sum balance\_weight|$ and role points parity) across 80 candidates per player count, rather than overclaiming "true theoretical game balance".
+
+---
+
+## 8. Deliverables & Updated Archives
+
+1. **Repository Commit**: Pushed to `origin/main` on GitHub (`irul2/warewolf-moderator`).
+2. **Deliverable Archives**:
    - `C:\Users\irul2\Downloads\aspire-werewolf-source-code.zip`
    - `C:\Users\irul2\Downloads\ASPIRE_WEREWOLF_SOURCE.zip`

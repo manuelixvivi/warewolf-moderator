@@ -91,6 +91,22 @@ export function evaluateWinConditions(
       }
     }
 
+    // Hoodlum (ROLE-036): wins if alive and both marked targets are dead when game concludes
+    for (const p of alivePlayers) {
+      if (
+        (p.role_id === "ROLE-036" || p.canonical_name === "Hoodlum") &&
+        p.markedTargetIds &&
+        p.markedTargetIds.length === 2
+      ) {
+        const target1 = players.find((t) => t.id === p.markedTargetIds![0]);
+        const target2 = players.find((t) => t.id === p.markedTargetIds![1]);
+        if (target1 && !target1.alive && target2 && !target2.alive) {
+          winningPlayerIds.add(p.id);
+          winningTeams.add("Solo");
+        }
+      }
+    }
+
     return {
       gameEnded: true,
       hasWon: true,
