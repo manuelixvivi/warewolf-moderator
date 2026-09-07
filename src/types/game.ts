@@ -1,4 +1,19 @@
-export type Phase = "SETUP" | "NAME_INPUT" | "NIGHT" | "DAY" | "GAME_OVER";
+// ============================================================
+// ASPIRE: WEREWOLF - Core Type Definitions
+// "One Village. Many Lies. One Wolf."
+// ============================================================
+
+export type Phase =
+  | "HOME"
+  | "CREATE_ROOM"
+  | "JOIN_ROOM"
+  | "LOBBY"
+  | "CARD_REVEAL"
+  | "NIGHT"
+  | "DAY_NARRATIVE"
+  | "DAY_VOTING"
+  | "GAME_OVER";
+
 export type Team = string;
 export type Category = string;
 export type SeerResult = "Werewolf" | "Villager" | "Dynamic" | string;
@@ -35,35 +50,47 @@ export interface SelectedRole {
   count: number;
 }
 
-export interface GameConfig {
+export interface RoomInfo {
+  code: string;
+  hostId: string;
+  hostName: string;
+  targetPlayerCount: number;
   gameName: string;
   storyTheme: string;
   narrationStyle: string;
   selectedRoles: SelectedRole[];
+  voiceEnabled: boolean;
 }
 
 export interface Player {
   id: string;
   name: string;
-  role_id: string;
-  canonical_name: string;
-  team: Team;
-  category: Category;
-  seer_result: SeerResult;
+  isHost: boolean;
+  isReady: boolean;
+  // Role info (assigned when game starts)
+  role_id?: string;
+  canonical_name?: string;
+  team?: Team;
+  category?: Category;
+  seer_result?: SeerResult;
+  description_id?: string;
+  description_en?: string;
+  tooltip_en?: string;
+  tooltip_id?: string;
+  active_phase?: string;
+  action_type?: string;
+  target_type?: string;
+  usage_limit?: string;
+  night_priority?: number;
+  can_change_role?: boolean;
+  // In-game state
   alive: boolean;
   protected: boolean;
   silenced: boolean;
   inCult: boolean;
   hasUsedAbility: boolean;
-  active_phase: string;
-  action_type: string;
-  target_type: string;
-  usage_limit: string;
-  night_priority: number;
-  can_change_role: boolean;
-  tooltip_en: string;
-  description_id?: string;
-  tooltip_id?: string;
+  votedForId?: string | null;
+  nightTargetId?: string | null;
 }
 
 export interface NightAction {
@@ -110,12 +137,31 @@ export interface WinResult {
   reason: string;
 }
 
+export interface NetworkMessage {
+  type:
+    | "SYNC_STATE"
+    | "JOIN_ROOM"
+    | "PLAYER_LEFT"
+    | "TOGGLE_READY"
+    | "START_GAME"
+    | "SUBMIT_NIGHT_ACTION"
+    | "SUBMIT_VOTE"
+    | "TRIGGERED_ACTION"
+    | "RESTART_GAME";
+  senderId: string;
+  senderName?: string;
+  payload?: any;
+}
+
 export interface GameState {
+  mode: "MULTIPLAYER" | "PASS_AND_PLAY";
   phase: Phase;
+  room: RoomInfo | null;
+  myPlayerId: string;
+  myPlayerName: string;
+  players: Player[];
   dayCount: number;
   nightCount: number;
-  config: GameConfig;
-  players: Player[];
   nightActions: NightAction[];
   triggeredActions: TriggeredAction[];
   activeTriggeredAction: TriggeredAction | null;
@@ -123,4 +169,6 @@ export interface GameState {
   currentNarrative: string;
   gameLog: LogEntry[];
   winResult: WinResult | null;
+  votes: Record<string, string>; // voterPlayerId -> targetPlayerId
+  seerResultHistory: Record<string, { targetName: string; result: string }>;
 }

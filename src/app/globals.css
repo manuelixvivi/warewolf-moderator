@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a0f;
+  --background: #08080c;
   --foreground: #ededed;
 }
 
@@ -9,6 +9,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
 }
 
 /* Custom scrollbar */
@@ -17,24 +18,32 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #1a1a2e;
+  background: #0d0d18;
 }
 ::-webkit-scrollbar-thumb {
-  background: #4c1d95;
+  background: #581c87;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #6d28d9;
+  background: #7e22ce;
 }
 
-/* Smooth transitions */
-* {
-  transition-property: background-color, border-color, color, opacity;
-  transition-duration: 150ms;
-  transition-timing-function: ease-in-out;
+/* 3D Card Flip Perspective */
+.perspective-1000 {
+  perspective: 1000px;
 }
 
-/* Override for transforms (don't animate them globally) */
-.scale-105 {
-  transition: transform 200ms ease-in-out;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

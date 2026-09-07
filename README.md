@@ -1,60 +1,69 @@
-﻿# 🐺 Werewolf Moderator
+# 🐺 ASPIRE: WEREWOLF
+### *One Village. Many Lies. One Wolf.*
 
-Alat bantu berbasis web untuk moderator permainan **Werewolf** (Ultimate Werewolf) — dilengkapi narasi AI dan game engine otomatis.
+Platform web permainan **Werewolf** online multipemain tanpa login. Permainan dipandu secara otomatis oleh **AI Moderator** (lengkap dengan suara Text-to-Speech bahasa Indonesia) dan **Game Engine**.
 
-## ✨ Fitur
+---
 
-- **🎭 Setup Permainan** — Pilih role, tentukan jumlah pemain, masukkan nama langsung per role
-- **🌙 Night Dashboard** — Semua aksi malam tampil sekaligus (tidak wizard step-by-step)
-- **☀️ Day Dashboard** — Narasi otomatis, voting eliminasi, ungkap role
-- **? Tooltips** — Setiap role punya tombol `?` dengan deskripsi lengkap (EN)
-- **⚡ Game Engine** — Resolusi malam otomatis (kill, protect, investigate)
-- **🏹 Triggered Actions** — Hunter, Doppelganger, Wolf Cub ditangani dengan modal
-- **📋 82 Role** — Database lengkap dari Werewolf: Ultimate Edition
+## ✨ Fitur Utama
 
-## 🚀 Deploy
+- **🚪 Sistem Room Tanpa Login**
+  - Pemain cukup memasukkan nama tampilan (display name) tanpa perlu mendaftar atau login akun.
+  - Tautan undangan instan (`/?room=CODE`) dan kode room 5 karakter (misal `WOLF-ABCD1`).
+- **👑 Kontrol Pemilik Room (Host)**
+  - Menentukan komposisi peran (role) dan kuota pemain.
+  - Jumlah pemain target dihitung otomatis berdasarkan total kartu peran yang dipilih.
+  - Tombol **START GAME** terkunci hingga room **FULL** (semua kursi pemain terisi).
+- **🎴 Tampilan Kartu Peran 3D (Secret Role Card)**
+  - Begitu permainan dimulai, peran diacak (randomized) oleh Game Engine.
+  - Setiap pemain mendapatkan kartu fantasi interaktif (3D Card Flip).
+  - Ketuk kartu untuk membuka peran rahasia, melihat kawan serigala, misi kemenangan, dan menyembunyikannya kembali agar tidak diintip pemain lain.
+- **🤖 AI Moderator & Game Engine Otomatis**
+  - Tidak memerlukan moderator manusia! AI Moderator membacakan narasi dan memandu fase malam, fajar, diskusi, voting, hingga akhir permainan.
+  - Suara AI otomatis menggunakan browser Web Speech API bahasa Indonesia.
+  - Hasil penyelidikan Seer tampil seketika (real-time) di layar Seer tanpa harus klik next.
+  - Bodyguard dilarang melindungi diri sendiri sesuai aturan resmi.
+- **⚡ Multiplayer Real-Time**
+  - Menggunakan WebRTC (PeerJS) untuk konektivitas lintas perangkat dan BroadcastChannel untuk pengujian multi-tab lokal.
+  - Berjalan 100% serverless di Vercel tanpa perlu database berbayar.
+- **📱 Mode 1 Perangkat (Pass & Play)**
+  - Opsi bermain di 1 smartphone atau laptop secara bergantian saat berkumpul bersama.
 
-Aplikasi ini di-deploy di [Vercel](https://vercel.com). Setelah push ke GitHub, sambungkan repo ke Vercel.
+---
 
 ## 🛠 Tech Stack
 
-- **Next.js 16** (App Router)
-- **TypeScript**
-- **Tailwind CSS v4**
-- **Zustand** (state management)
+- **Framework:** Next.js 16 (App Router)
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS v4 (Gothic Dark Werewolf Theme)
+- **Networking:** PeerJS (WebRTC) + BroadcastChannel
+- **State Management:** Zustand
+- **Speech Engine:** Web Speech API (Voice Synthesis)
+- **Deployment:** Vercel
 
-## 📦 Instalasi Lokal
+---
+
+## 📦 Menjalankan di Lokal
 
 ```bash
+# 1. Install dependencies
 npm install
+
+# 2. Jalankan server development
 npm run dev
 ```
 
-Buka [http://localhost:3000](http://localhost:3000)
+Buka [http://localhost:3000](http://localhost:3000) di browser. Buka tab baru atau bagikan link ke perangkat lain di jaringan untuk bermain bersama.
 
-## 🎮 Cara Main
+---
 
-1. **Setup** — Masukkan nama game, pilih tema & gaya narasi, pilih role + jumlah
-2. **Nama Pemain** — Input nama untuk setiap role yang dipilih
-3. **Malam** — Selesaikan semua aksi malam, klik "Selesaikan Malam"
-4. **Siang** — Baca narasi, lakukan voting eliminasi, mulai malam berikutnya
-5. **Game Over** — Kondisi menang otomatis terdeteksi
+## 🚀 Deployment ke Vercel
 
-## 📁 Struktur Proyek
+Proyek ini telah terhubung ke GitHub di repository `manuelixvivi/warewolf-moderator`.
+Setiap `git push` ke branch `main` akan otomatis men-deploy versi terbaru ke Vercel.
 
-```
-src/
-  app/           # Next.js App Router
-  components/
-    setup/       # GameSetupScreen, PlayerNameInput
-    game/        # NightDashboard, DayDashboard, dll.
-    ui/          # RoleCard, Tooltip
-  data/
-    roles.json   # 82 role database
-  lib/
-    gameEngine.ts # Game logic
-  store/
-    gameStore.ts  # Zustand state
-  types/
-    game.ts       # TypeScript types
-```
+---
+
+## 📜 Lisensi
+Dikembangkan untuk komunitas pemain Werewolf.
+*One Village. Many Lies. One Wolf.*
