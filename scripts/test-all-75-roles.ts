@@ -347,8 +347,8 @@ async function runAllTests() {
     const resSpecial = resolveInvestigation(auraSeer, seer, []);
     const resNormal = resolveInvestigation(auraSeer, villager, []);
 
-    assert(resSpecial.resultString === "Kekuatan Khusus", "[ROLE-027] Aura Seer detects special powers");
-    assert(resNormal.resultString === "Biasa", "[ROLE-027] Aura Seer detects normal villagers");
+    assert(resSpecial.resultString.includes("Kekuatan Khusus"), "[ROLE-027] Aura Seer detects special powers");
+    assert(resNormal.resultString.includes("Biasa"), "[ROLE-027] Aura Seer detects normal villagers");
   }
 
   // Sorceress (ROLE-051)
@@ -360,8 +360,8 @@ async function runAllTests() {
     const rSeer = resolveInvestigation(sorc, seer, []);
     const rVil = resolveInvestigation(sorc, villager, []);
 
-    assert(rSeer.resultString === "Seer Ditemukan", "[ROLE-051] Sorceress detects Seer");
-    assert(rVil.resultString === "Bukan Seer", "[ROLE-051] Sorceress recognizes non-Seer");
+    assert(rSeer.resultString.includes("Seer Ditemukan"), "[ROLE-051] Sorceress detects Seer");
+    assert(rVil.resultString.includes("Bukan Seer"), "[ROLE-051] Sorceress recognizes non-Seer");
   }
 
   // Revealer (ROLE-016)
@@ -410,8 +410,8 @@ async function runAllTests() {
     const same = resolveInvestigation(mentalist, t1, [], t2);
     const diff = resolveInvestigation(mentalist, t1, [], t3);
 
-    assert(same.resultString === "Tim Sama", "[ROLE-013] Mentalist detects two players on same team");
-    assert(diff.resultString === "Tim Berbeda", "[ROLE-013] Mentalist detects two players on different teams");
+    assert(same.resultString.includes("Tim Sama"), "[ROLE-013] Mentalist detects two players on same team");
+    assert(diff.resultString.includes("Tim Berbeda"), "[ROLE-013] Mentalist detects two players on different teams");
   }
 
   // -----------------------------------------------------------------

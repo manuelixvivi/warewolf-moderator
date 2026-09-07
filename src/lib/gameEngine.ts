@@ -53,6 +53,45 @@ export {
   getRoleByName,
 };
 
+/**
+ * Converts a UI/Network Player into a rich PlayerEngineState with complete
+ * metadata derived from the canonical database.
+ */
+export function playerToEngineState(p: Player): PlayerEngineState {
+  const dbRole =
+    (p.role_id ? getRoleById(p.role_id) : undefined) ||
+    (p.canonical_name ? getRoleByName(p.canonical_name) : undefined);
+
+  return {
+    ...p,
+    role_id: p.role_id || dbRole?.role_id || "ROLE-024",
+    canonical_name: p.canonical_name || dbRole?.canonical_name || "Villager",
+    team: p.team || dbRole?.team || "Village",
+    originalTeam: p.team || dbRole?.team || "Village",
+    category: p.category || dbRole?.category || "Village",
+    seer_result: dbRole?.seer_result || p.seer_result || (p.team === "Werewolf" ? "Werewolf" : "Villager"),
+    role_points: dbRole?.role_points ?? 1,
+    balance_weight: dbRole?.balance_weight ?? 0,
+    night_priority: dbRole?.night_priority ?? p.night_priority ?? 50,
+    active_phase: dbRole?.active_phase ?? p.active_phase ?? "None",
+    action_type: dbRole?.action_type ?? p.action_type ?? "None",
+    trigger: dbRole?.trigger ?? "",
+    target_type: dbRole?.target_type ?? p.target_type ?? "None",
+    usage_limit: dbRole?.usage_limit ?? p.usage_limit ?? "Passive",
+    can_change_role: dbRole?.can_change_role ?? p.can_change_role ?? false,
+    reveal_on_death: dbRole?.reveal_on_death,
+    requires_engine_resolution: dbRole?.requires_engine_resolution,
+    description_en: dbRole?.description_en ?? p.description_en,
+    description_id: dbRole?.description_id ?? p.description_id,
+    tooltip_en: dbRole?.tooltip_en ?? p.tooltip_en,
+    tooltip_id: dbRole?.tooltip_id ?? p.tooltip_id,
+    isCursed: p.role_id === "ROLE-031" || dbRole?.canonical_name === "Cursed" || p.canonical_name === "Cursed",
+    usedAbilityCount: 0,
+    tannerWon: false,
+    princeProtectedUsed: false,
+  };
+}
+
 // ── 1. Role Randomizer & Allocator ──────────────────────────────────
 export function randomizeRolesToPlayers(
   players: Player[],
@@ -136,26 +175,7 @@ export function buildNightActions(
   nightCount: number = 1,
   wolfCubExtraKill: boolean = false
 ): NightAction[] {
-  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
-    ...p,
-    role_id: p.role_id || "ROLE-066",
-    canonical_name: p.canonical_name || "Villager",
-    team: p.team || "Village",
-    originalTeam: p.team || "Village",
-    category: p.category || "Village",
-    seer_result: p.seer_result || "Villager",
-    role_points: 1,
-    balance_weight: 0,
-    night_priority: p.night_priority || 50,
-    active_phase: p.active_phase || "None",
-    action_type: p.action_type || "None",
-    trigger: "",
-    target_type: p.target_type || "None",
-    usage_limit: p.usage_limit || "Passive",
-    can_change_role: p.can_change_role || false,
-    isCursed: p.canonical_name === "Cursed",
-    usedAbilityCount: 0,
-  }));
+  const enginePlayers: PlayerEngineState[] = players.map(playerToEngineState);
 
   const engineActions = buildEngineNightActions(enginePlayers, nightCount, wolfCubExtraKill);
 
@@ -182,26 +202,7 @@ export function resolveNight(
   result: NightResult;
   triggered: TriggeredAction[];
 } {
-  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
-    ...p,
-    role_id: p.role_id || "ROLE-066",
-    canonical_name: p.canonical_name || "Villager",
-    team: p.team || "Village",
-    originalTeam: p.team || "Village",
-    category: p.category || "Village",
-    seer_result: p.seer_result || "Villager",
-    role_points: 1,
-    balance_weight: 0,
-    night_priority: p.night_priority || 50,
-    active_phase: p.active_phase || "None",
-    action_type: p.action_type || "None",
-    trigger: "",
-    target_type: p.target_type || "None",
-    usage_limit: p.usage_limit || "Passive",
-    can_change_role: p.can_change_role || false,
-    isCursed: p.canonical_name === "Cursed",
-    usedAbilityCount: 0,
-  }));
+  const enginePlayers: PlayerEngineState[] = players.map(playerToEngineState);
 
   const engineActions: EngineNightAction[] = actions.map((a) => ({
     id: a.id,
@@ -319,28 +320,7 @@ export function resolveDayVotes(
   tally: Record<string, number>;
   triggered: TriggeredAction[];
 } {
-  const enginePlayers: PlayerEngineState[] = players.map((p) => ({
-    ...p,
-    role_id: p.role_id || "ROLE-066",
-    canonical_name: p.canonical_name || "Villager",
-    team: p.team || "Village",
-    originalTeam: p.team || "Village",
-    category: p.category || "Village",
-    seer_result: p.seer_result || "Villager",
-    role_points: 1,
-    balance_weight: 0,
-    night_priority: p.night_priority || 50,
-    active_phase: p.active_phase || "None",
-    action_type: p.action_type || "None",
-    trigger: "",
-    target_type: p.target_type || "None",
-    usage_limit: p.usage_limit || "Passive",
-    can_change_role: p.can_change_role || false,
-    isCursed: p.canonical_name === "Cursed",
-    usedAbilityCount: 0,
-    tannerWon: false,
-    princeProtectedUsed: false,
-  }));
+  const enginePlayers: PlayerEngineState[] = players.map(playerToEngineState);
 
   const { updatedPlayers: engineUpdated, outcome } = engineResolveDayVotes(
     enginePlayers,

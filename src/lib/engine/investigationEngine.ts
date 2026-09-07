@@ -74,7 +74,7 @@ export function resolveInvestigation(
       roleName: role,
       targetId: target.id,
       targetName: target.name,
-      resultString: isSpecial ? "Kekuatan Khusus" : "Biasa",
+      resultString: isSpecial ? "Aura Detected (Kekuatan Khusus)" : "No Aura (Biasa)",
       isThreat: isSpecial,
       backfiredOnInvestigator: false,
       notes: `${target.name} memiliki ${isSpecial ? "aura berkekuatan khusus" : "aura biasa"}.`,
@@ -89,7 +89,7 @@ export function resolveInvestigation(
       roleName: role,
       targetId: target.id,
       targetName: target.name,
-      resultString: isSeer ? "Seer Ditemukan" : "Bukan Seer",
+      resultString: isSeer ? "Seer Detected (Seer Ditemukan)" : "Not the Seer (Bukan Seer)",
       isThreat: isSeer,
       backfiredOnInvestigator: false,
       notes: `${target.name} ${isSeer ? "adalah sang Seer!" : "bukan Seer."}`,
@@ -104,7 +104,7 @@ export function resolveInvestigation(
       roleName: role,
       targetId: target.id,
       targetName: target.name,
-      resultString: isWolf ? "Werewolf (Terungkap)" : "Warga (Kegagalan)",
+      resultString: isWolf ? "Werewolf (Revealed)" : "Villager (Backfired)",
       isThreat: isWolf,
       backfiredOnInvestigator: !isWolf,
       notes: isWolf
@@ -125,7 +125,7 @@ export function resolveInvestigation(
       roleName: role,
       targetId: target.id,
       targetName: target.name,
-      resultString: hasWolf ? "Ada Serigala di Antara Mereka" : "Aman / Tidak Ada Serigala",
+      resultString: hasWolf ? "Werewolf Detected in Neighborhood" : "Clear (Tidak Ada Serigala)",
       isThreat: hasWolf,
       backfiredOnInvestigator: false,
       notes: `P.I. memeriksa ${target.name} dan tetangganya. ${
@@ -134,17 +134,21 @@ export function resolveInvestigation(
     };
   }
 
-  // 6. The Count: Tells current living Werewolf count
+  // 6. The Count: Tells living Werewolf count in halves of the village
   if (role === "The Count") {
     const livingWolves = allPlayers.filter(
-      (p) => p.alive && (p.team === "Werewolf" || p.team === "Solo Werewolf")
+      (p) => p.alive && (p.team === "Werewolf" || p.team === "Solo Werewolf" || p.category === "Werewolf")
     ).length;
+    const half1 = allPlayers.slice(0, Math.ceil(allPlayers.length / 2));
+    const half2 = allPlayers.slice(Math.ceil(allPlayers.length / 2));
+    const w1 = half1.filter((p) => p.alive && (p.team === "Werewolf" || p.category === "Werewolf")).length;
+    const w2 = half2.filter((p) => p.alive && (p.team === "Werewolf" || p.category === "Werewolf")).length;
     return {
       investigatorId: investigator.id,
       roleName: role,
       targetId: investigator.id,
       targetName: "Desa",
-      resultString: `${livingWolves} Werewolf Hidup`,
+      resultString: `First Half: ${w1} Wolves, Second Half: ${w2} Wolves (${livingWolves} Werewolf Hidup)`,
       isThreat: livingWolves > 0,
       backfiredOnInvestigator: false,
       notes: `The Count menghitung ada ${livingWolves} serigala yang masih hidup di desa.`,
@@ -159,7 +163,7 @@ export function resolveInvestigation(
       roleName: role,
       targetId: target.id,
       targetName: `${target.name} & ${secondaryTarget.name}`,
-      resultString: sameTeam ? "Tim Sama" : "Tim Berbeda",
+      resultString: sameTeam ? "Tim Sama (SAME TEAM)" : "Tim Berbeda (DIFFERENT TEAMS)",
       isThreat: false,
       backfiredOnInvestigator: false,
       notes: `Mentalist merasakan bahwa ${target.name} dan ${secondaryTarget.name} ${

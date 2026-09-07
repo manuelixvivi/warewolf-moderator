@@ -931,7 +931,7 @@
     "entity_type": "Role",
     "category": "Werewolf",
     "team": "Werewolf-aligned",
-    "seer_result": "Werewolf",
+    "seer_result": "Villager",
     "description_en": "A Werewolf-aligned role that supports the Werewolves. Its exact abilities depend on the ruleset.",
     "role_points": 3,
     "balance_weight": -3,

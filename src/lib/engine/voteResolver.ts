@@ -81,11 +81,9 @@ export function resolveDayVotes(
 
     let targetId = rawTargetId;
 
-    // Pacifist (ROLE-048): if vote timed out or Pacifist prefers non-elimination
-    if (voter.role_id === "ROLE-048" || voter.canonical_name === "Pacifist") {
-      if (!targetId || targetId === "SKIP") {
-        targetId = "SKIP";
-      }
+    // Pacifist (ROLE-048) or any non-elimination vote
+    if (targetId === "NO_ELIMINATION" || targetId === "SKIP" || !targetId) {
+      targetId = "SKIP";
     }
 
     // Ralph (ROLE-015) & Sam (ROLE-017): on timeout, vote for no elimination

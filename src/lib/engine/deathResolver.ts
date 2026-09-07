@@ -223,8 +223,24 @@ export function requestDeath(
     for (const [pId, p] of playerMap.entries()) {
       if (
         p.alive &&
-        p.canonical_name === "Dire Wolf" &&
+        (p.role_id === "ROLE-060" || p.canonical_name === "Dire Wolf") &&
         p.direWolfCompanionId === victim.id &&
+        !processedDeaths.has(pId)
+      ) {
+        deathQueue.push({
+          targetId: pId,
+          cause: "CHAIN_REACTION",
+          killerId: victim.id,
+        });
+      }
+    }
+
+    // Virginia Woolf (ROLE-063): Fear target dies -> Virginia Woolf dies
+    for (const [pId, p] of playerMap.entries()) {
+      if (
+        p.alive &&
+        (p.role_id === "ROLE-063" || p.canonical_name === "Virginia Woolf") &&
+        p.fearTargetId === victim.id &&
         !processedDeaths.has(pId)
       ) {
         deathQueue.push({

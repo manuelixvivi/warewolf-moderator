@@ -11,7 +11,7 @@ import {
 } from "./types";
 import { resolveInvestigation } from "./investigationEngine";
 import { resolveDeathChain } from "./deathResolver";
-import { revealDrunkRole } from "./roleTransformation";
+import { revealDrunkRole, transformPlayerRole } from "./roleTransformation";
 
 export interface NightResolutionContext {
   wolvesSkippingTonight?: boolean; // From Diseased infection on previous night
@@ -168,6 +168,47 @@ export function resolveNightActions(
         roleName: "Leprechaun",
         originalTargetId: action.target_player_id,
         newTargetId: action.secondary_target_id,
+      });
+    }
+
+    // Dr Helgo (ROLE-005) & Hackmaster (ROLE-008): Steal / duplicate card on Night 1
+    if (
+      (roleName.includes("helgo") || action.role_id === "ROLE-005" ||
+        roleName.includes("hackmaster") || action.role_id === "ROLE-008") &&
+      nightCount === 1 &&
+      target
+    ) {
+      const { updatedPlayer } = transformPlayerRole(
+        actor,
+        target.role_id,
+        "Stole card on Night 1"
+      );
+      playerMap.set(actor.id, { ...updatedPlayer, hasUsedAbility: true });
+      outcome.triggeredActions.push({
+        type: "ROLE_STOLEN",
+        playerId: actor.id,
+        roleName: actor.canonical_name,
+        description: `${actor.name} mengambil peran milik ${target.name} dan kini menjadi ${updatedPlayer.canonical_name}!`,
+      });
+    }
+
+    // The Thing (ROLE-076): Taps neighbor
+    if ((roleName.includes("the thing") || action.role_id === "ROLE-076") && target) {
+      outcome.triggeredActions.push({
+        type: "THING_TAPPED",
+        playerId: target.id,
+        roleName: "The Thing",
+        description: `The Thing mengetuk pundak ${target.name}!`,
+      });
+    }
+
+    // Ghost (ROLE-035): Gives clue on Night 1
+    if ((roleName.includes("ghost") || action.role_id === "ROLE-035") && nightCount === 1) {
+      outcome.triggeredActions.push({
+        type: "GHOST_CLUE",
+        playerId: actor.id,
+        roleName: "Ghost",
+        description: `Ghost memberikan petunjuk misterius dari alam baka!`,
       });
     }
   }
@@ -364,6 +405,59 @@ export function resolveNightActions(
       const target = playerMap.get(action.target_player_id);
       if (target && target.alive && !target.protected) {
         pendingVictimIds.add(target.id);
+      }
+    }
+
+    // Alpha Wolf (ROLE-003): Convert/Override
+    if (
+      (roleName.includes("alpha wolf") || action.role_id === "ROLE-003") &&
+      actor &&
+      actor.alive &&
+      (action.action_type === "Convert/Override" || action.action_type?.includes("Convert"))
+    ) {
+      const target = playerMap.get(action.target_player_id);
+      if (target && target.alive && !target.protected) {
+        pendingVictimIds.delete(target.id);
+        const { updatedPlayer } = transformPlayerRole(target, "ROLE-023", "Alpha Wolf conversion");
+        playerMap.set(target.id, updatedPlayer);
+        outcome.convertedPlayerIds.push({
+          playerId: target.id,
+          oldTeam: target.team,
+          newTeam: "Werewolf",
+        });
+        playerMap.set(actor.id, { ...actor, hasUsedAbility: true });
+        outcome.triggeredActions.push({
+          type: "ALPHA_WOLF_CONVERT",
+          playerId: target.id,
+          roleName: "Alpha Wolf",
+          description: `Alpha Wolf mengubah ${target.name} menjadi Werewolf baru!`,
+        });
+      }
+    }
+
+    // Bloody Mary (ROLE-077): Revenge strike
+    if ((roleName.includes("bloody mary") || action.role_id === "ROLE-077") && action.target_player_id) {
+      const target = playerMap.get(action.target_player_id);
+      if (target && target.alive && !target.protected) {
+        pendingVictimIds.add(target.id);
+      }
+    }
+
+    // Frankenstein's Monster (ROLE-066): Copies power
+    if (
+      (roleName.includes("frankenstein") || action.role_id === "ROLE-066") &&
+      actor &&
+      actor.alive &&
+      action.target_player_id
+    ) {
+      const target = playerMap.get(action.target_player_id);
+      if (target) {
+        outcome.triggeredActions.push({
+          type: "FRANKENSTEIN_ACQUIRED",
+          playerId: actor.id,
+          roleName: "Frankenstein's Monster",
+          description: `Frankenstein menyerap kemampuan dari ${target.name}!`,
+        });
       }
     }
   }

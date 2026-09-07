@@ -49,22 +49,18 @@ export function getRoleByName(name: string): RoleData | undefined {
 
 /**
  * Calculates the exact binary Seer result for any player according to DB specifications.
- * Wolf Man -> Villager (Seer sees Wolf Man as Villager)
- * Lycan -> Werewolf (Seer sees Lycan as Werewolf)
- * Werewolves -> Werewolf
- * All normal villagers/neutrals -> Villager
+ * Purely driven by database seer_result attribute (Lycan has "Werewolf", Wolf Man has "Villager", etc.)
+ * Dynamically updates if player role or team changes (e.g. Cursed conversion).
  */
 export function evaluateSeerResult(player: PlayerEngineState): "Werewolf" | "Villager" {
-  if (player.canonical_name === "Wolf Man") {
+  const dbSeerResult = player.seer_result || ROLE_BY_ID.get(player.role_id)?.seer_result;
+  if (dbSeerResult === "Werewolf") {
+    return "Werewolf";
+  }
+  if (dbSeerResult === "Villager") {
     return "Villager";
   }
-  if (player.canonical_name === "Lycan") {
-    return "Werewolf";
-  }
-  if (player.seer_result === "Werewolf") {
-    return "Werewolf";
-  }
-  return "Villager";
+  return player.team === "Werewolf" ? "Werewolf" : "Villager";
 }
 
 /**
@@ -133,16 +129,17 @@ export function buildEngineNightActions(
   const alivePlayers = players.filter((p) => p.alive);
 
   // 1. Werewolf Group Action (Collective Kill)
-  const aliveWerewolves = alivePlayers.filter(
-    (p) =>
+  // Driven by DB category or team "Werewolf", excluding auxiliary roles that don't participate in pack kill
+  const aliveWerewolves = alivePlayers.filter((p) => {
+    const roleDef = ROLE_BY_ID.get(p.role_id);
+    const isWolfTeam =
       p.team === "Werewolf" ||
       p.team === "Solo Werewolf" ||
-      p.canonical_name === "Werewolf" ||
-      p.canonical_name === "Alpha Wolf" ||
-      p.canonical_name === "Wolf Cub" ||
-      p.canonical_name === "Wolf Man" ||
-      p.canonical_name === "Big Bad Wolf"
-  );
+      roleDef?.category === "Werewolf" ||
+      roleDef?.team === "Werewolf";
+    const actionType = p.action_type || roleDef?.action_type || "";
+    return isWolfTeam && actionType !== "Find Seer" && actionType !== "Support Werewolves";
+  });
 
   if (aliveWerewolves.length > 0) {
     // Standard Werewolf pack attack
@@ -174,12 +171,12 @@ export function buildEngineNightActions(
 
   // 2. Individual Roles Actions
   for (const player of alivePlayers) {
-    // Skip collective wolves because they are grouped in Werewolves action above
+    const roleDef = ROLE_BY_ID.get(player.role_id);
+
+    // Skip collective wolf pack members who already participate in the group action above
     if (
-      (player.canonical_name === "Werewolf" ||
-        player.canonical_name === "Wolf Cub" ||
-        player.canonical_name === "Wolf Man") &&
-      player.team === "Werewolf"
+      aliveWerewolves.some((w) => w.id === player.id) &&
+      (player.action_type === "Werewolf Action" || player.action_type === "Kill")
     ) {
       continue;
     }
@@ -188,26 +185,8 @@ export function buildEngineNightActions(
       continue;
     }
 
-    let priority = player.night_priority || 50;
-    // Normalized night priority ordering based on database
-    if (player.canonical_name === "Doppelgänger") priority = 10;
-    else if (player.canonical_name === "Nostradamus") priority = 12;
-    else if (player.canonical_name === "Cupid") priority = 20;
-    else if (player.canonical_name === "Virginia Woolf") priority = 22;
-    else if (player.canonical_name === "Leprechaun") priority = 28;
-    else if (player.canonical_name === "Bodyguard") priority = 30;
-    else if (player.canonical_name === "Priest") priority = 32;
-    else if (player.canonical_name === "Spellcaster") priority = 38;
-    else if (player.canonical_name === "Vampire") priority = 46;
-    else if (player.canonical_name === "Chupacabra") priority = 47;
-    else if (player.canonical_name === "Huntress") priority = 48;
-    else if (player.canonical_name === "Witch") priority = 58;
-    else if (player.canonical_name === "Seer") priority = 60;
-    else if (player.canonical_name === "Aura Seer") priority = 60;
-    else if (player.canonical_name === "Revealer") priority = 60;
-    else if (player.canonical_name === "P.I.") priority = 60;
-    else if (player.canonical_name === "Sorceress") priority = 65;
-    else if (player.canonical_name === "Cult Leader") priority = 75;
+    // Directly driven by database night_priority attribute
+    const priority = player.night_priority ?? roleDef?.night_priority ?? 50;
 
     actions.push({
       id: `night-${nightCount}-${player.canonical_name}-${player.id}`,
