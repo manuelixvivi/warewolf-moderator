@@ -812,8 +812,16 @@ export const useGameStore = create<GameStore>()((set, get) => {
         }
 
         case "ASSIGN_PRIVATE_ROLE": {
+          // Authoritative check: Only roles assigned by the designated Room Host are accepted!
+          const hostId = get().room?.hostId;
+          if (hostId && msg.senderId !== hostId) {
+            console.warn(`[Authoritative Security] Rejected ASSIGN_PRIVATE_ROLE from non-host peer: ${msg.senderId}`);
+            return;
+          }
           if (msg.payload && msg.payload.player) {
             const privatePlayer = msg.payload.player;
+            const myId = get().myPlayerId;
+            if (privatePlayer.id !== myId) return; // Strict recipient check
             set((state) => {
               const updatedPlayers = state.players.map((p) =>
                 p.id === privatePlayer.id ? { ...p, ...privatePlayer } : p
@@ -828,9 +836,16 @@ export const useGameStore = create<GameStore>()((set, get) => {
         }
 
         case "SYNC_STATE": {
+          // Authoritative check: Only state updates from the designated Room Host are trusted!
+          const hostId = get().room?.hostId;
+          const myId = get().myPlayerId;
+          const isHost = hostId === myId;
+          if (hostId && !isHost && msg.senderId !== hostId) {
+            console.warn(`[Authoritative Security] Rejected SYNC_STATE from non-host peer: ${msg.senderId}`);
+            return;
+          }
+
           if (msg.payload) {
-            const myId = get().myPlayerId;
-            const isHost = get().room?.hostId === myId;
             set((state) => {
               let mergedPlayers = msg.payload.players || state.players;
               if (!isHost) {
@@ -863,6 +878,14 @@ export const useGameStore = create<GameStore>()((set, get) => {
         }
 
         case "START_GAME": {
+          // Authoritative check: Only the designated Room Host can start the game!
+          const hostId = get().room?.hostId;
+          const myId = get().myPlayerId;
+          const isHost = hostId === myId;
+          if (hostId && !isHost && msg.senderId !== hostId) {
+            console.warn(`[Authoritative Security] Rejected START_GAME from non-host peer: ${msg.senderId}`);
+            return;
+          }
           if (msg.payload) {
             const myId = get().myPlayerId;
             const isHost = get().room?.hostId === myId;
