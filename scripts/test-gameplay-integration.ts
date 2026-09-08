@@ -18,6 +18,7 @@ import {
   checkWinCondition,
 } from "../src/lib/gameEngine";
 import { ROLE_BY_ID } from "../src/lib/engine/abilityRegistry";
+import { useGameStore } from "../src/store/gameStore";
 
 let passCount = 0;
 let failCount = 0;
@@ -202,6 +203,52 @@ console.log("\n--- FLOW 3: FATHER TIME TIMEOUT INTEGRATION (3 TIMEOUTS -> VICTOR
   assert(
     Boolean(win3 !== null && win3.winner?.includes("Father Time")),
     "[Flow 3] Father Time wins when timeoutCount reaches 3 in real integration flow"
+  );
+
+  // --- FULL E2E STORE PIPELINE TEST ---
+  // Verify complete pipeline: Timer event (isTimeout: true) -> resolveDayVotingPhase() -> state.timeoutCount -> auto checkWinCondition -> phase: GAME_OVER
+  useGameStore.setState({
+    room: {
+      code: "TEST_FT",
+      hostId: "ft",
+      hostName: "Father Time",
+      gameName: "ASPIRE",
+      storyTheme: "Medieval",
+      narrationStyle: "Dramatic",
+      gameMode: "MODE_1_FIXED",
+      targetPlayerCount: 5,
+      voiceEnabled: false,
+      selectedRoles: [],
+    },
+    myPlayerId: "ft",
+    players,
+    votes: { ft: "SKIP" },
+    timeoutCount: 0,
+    dayCount: 1,
+    phase: "DAY_VOTING",
+    winResult: null,
+  });
+
+  // Cycle 1 timeout event:
+  useGameStore.getState().resolveDayVotingPhase(true);
+  assert(useGameStore.getState().timeoutCount === 1, "[Flow 3] Store pipeline: timeoutCount increments to 1");
+  assert(useGameStore.getState().phase === "DAY_NARRATIVE", "[Flow 3] Store pipeline: game continues to narrative on 1st timeout");
+  assert(useGameStore.getState().winResult === null, "[Flow 3] Store pipeline: no winner on 1st timeout");
+
+  // Cycle 2 timeout event:
+  useGameStore.setState({ phase: "DAY_VOTING", votes: {} });
+  useGameStore.getState().resolveDayVotingPhase(true);
+  assert(useGameStore.getState().timeoutCount === 2, "[Flow 3] Store pipeline: timeoutCount increments to 2");
+  assert(useGameStore.getState().winResult === null, "[Flow 3] Store pipeline: no winner on 2nd timeout");
+
+  // Cycle 3 timeout event:
+  useGameStore.setState({ phase: "DAY_VOTING", votes: {} });
+  useGameStore.getState().resolveDayVotingPhase(true);
+  assert(useGameStore.getState().timeoutCount === 3, "[Flow 3] Store pipeline: timeoutCount reaches 3");
+  assert(useGameStore.getState().phase === "GAME_OVER", "[Flow 3] Store pipeline: phase automatically transitions to GAME_OVER");
+  assert(
+    Boolean(useGameStore.getState().winResult?.winner?.includes("Father Time")),
+    "[Flow 3] Store pipeline: Father Time declared winner automatically via full store pipeline"
   );
 }
 

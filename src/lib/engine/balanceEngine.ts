@@ -287,9 +287,10 @@ export function selectBalancedSubsetFromPool(
 }
 
 /**
- * Mode 3: Algorithmic Balance Search across ALL 75 Roles
- * Dynamically evaluates candidates drawn from the 75-role database, calculates mathematical
- * balance scores (role_points + balance_weight), rejects unbalanced compositions,
+ * Mode 3: Constrained Heuristic Balance Search across ALL 75 Roles
+ * Dynamically evaluates candidate compositions drawn from the 75-role database using aggregate
+ * balance_weight as its primary balance objective, with role metadata (role_points, category)
+ * available for composition constraints and telemetry analysis. Rejects unbalanced compositions
  * and selects an optimal, highly diverse, mathematically balanced role composition.
  */
 export function auditGenerateBalancedRandomComposition(

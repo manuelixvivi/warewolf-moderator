@@ -241,18 +241,19 @@ The 10 roles that previously only checked metadata or private state were upgrade
 A dedicated integration suite [`scripts/test-gameplay-integration.ts`](file:///C:/Users/irul2/warewolf-moderator/scripts/test-gameplay-integration.ts) exercises high-level game state flows:
 1. **Flow 1 (Classic Cycle)**: Lobby creation -> Mode 1 assignment -> Night actions -> Night resolution (Bodyguard save) -> Day discussion/voting -> Werewolf elimination -> Village victory.
 2. **Flow 2 (Cascading Death Chain)**: Hunter lynched by day vote -> triggers Hunter retaliation -> retaliation shot eliminates Werewolf -> Village victory.
-3. **Flow 3 (Real Timer Timeout)**: Day times out 3 times -> Father Time victory (verifying negative tests on 1 and 2 timeouts).
+3. **Flow 3 (Real Timer Timeout & Full Store Pipeline)**: Day times out 3 times -> Father Time victory (verifying negative tests on 1 and 2 timeouts, and exercising the complete store pipeline: `resolveDayVotingPhase(true)` -> `state.timeoutCount` increment -> automatic `checkWinCondition` -> `GAME_OVER` transition).
 4. **Flow 4 (Hoodlum Win Condition)**: Both marked targets die -> game ends with living villagers -> Hoodlum confirmed in `winningPlayerIds`.
 
 ### 7.5 Honest Characterization of Balance Engine
 Mode 2 and Mode 3 dynamic balancing is characterized with technical honesty as a **constrained heuristic balance search (randomized search without replacement)** seeking compositions near balance parity based on database `balance_weight` and `role_points`, rather than claiming exhaustive combinatorial optimization or theoretical game balance proof. Mode 2 samples strictly without replacement to protect unique roles from accidental duplication.
 
-### 7.6 Authoritative Network Security & Packet Spoof Prevention (Phase 4.1 Upgrade)
-In response to adversarial security audit findings, [`gameStore.ts`](file:///C:/Users/irul2/warewolf-moderator/src/store/gameStore.ts) has been hardened on the authoritative host/moderator node:
-- **Sender Authentication**: Incoming `SUBMIT_NIGHT_ACTION`, `SUBMIT_VOTE`, and `TOGGLE_READY` verify that `msg.senderId` matches the payload player ID, rejecting spoofed packets.
-- **Liveness & Status Validation**: Actions sent by dead players or votes cast by silenced players are dropped immediately.
-- **Action Authorization**: Client-provided `roleName` strings are **never** trusted. The host verifies that `senderId` is authentically listed in `a.player_ids` of an active night action.
-- **Target Verification**: Target player IDs are validated against living room participants.
+### 7.6 Network Architecture & Realistic Security Boundary (Phase 4.1 Upgrade)
+Komunikasi multiplayer ASPIRE: WEREWOLF menggunakan broker MQTT terenkripsi melalui WebSocket Secure (WSS), dengan pemisahan public dan private state masking untuk membatasi paparan informasi rahasia.
+Pada node host/moderator, diterapkan validasi *host-authoritative* untuk menegakkan integritas aturan permainan:
+- **Packet Validation**: Memeriksa `msg.senderId` terhadap ID pemain pengirim untuk mencegah desinkronisasi payload sederhana.
+- **Liveness & Status Validation**: Aksi malam atau vote dari pemain yang sudah mati atau tersilent langsung diabaikan oleh node host.
+- **Action Authorization**: Node host memverifikasi bahwa `senderId` terdaftar di `a.player_ids` aksi malam yang aktif sebelum mencatat hasil aksi.
+- **Batasan Keamanan (Realistic Boundary)**: Karena menggunakan broker MQTT publik tanpa server autentikasi tersentralisasi (dedicated auth server / JWT session tokens), model ini didesain optimal untuk skenario **casual & peer-to-peer / demo kampus**. Untuk produksi komersial skala besar, roadmap arsitektur merekomendasikan transisi ke dedicated authoritative server dengan secure session handshake.
 
 ### 7.7 Role Transformation Engine Consistency
 - **`originalTeam` Synchronization**: [`transformPlayerRole()`](file:///C:/Users/irul2/warewolf-moderator/src/lib/engine/roleTransformation.ts) now updates `originalTeam: targetRole.team` alongside `team`, preventing state desynchronization across modules.
