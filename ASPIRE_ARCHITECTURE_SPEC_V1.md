@@ -31,12 +31,12 @@ graph TD
         Sanitizer["Fog-of-War State Masker"]
     end
 
-    subgraph DataStore ["Persistence & Cache"]
-        Redis[("Redis Cluster: Ephemeral Room State & PubSub")]
-        PG[("PostgreSQL: Match Logs, Users & Analytics")]
+    subgraph DataStore ["Persistence & Cache Hierarchy"]
+        PG[("PostgreSQL: Source of Truth (Append-Only Event Store)")]
+        Redis[("Redis: Ephemeral State, Sessions & PubSub")]
     end
 
-    subgraph AIWorker ["AI Lore Layer (Asynchronous)"]
+    subgraph AIWorker ["AI Lore Layer (Asynchronous Non-Blocking)"]
         Queue["BullMQ Job Queue"]
         LLM["Gemini / Groq LLM Worker"]
         Fallback["Deterministic Template Engine"]
@@ -49,11 +49,12 @@ graph TD
     FSM --> Engine
     Engine --> Contracts
     Engine --> EventBus
-    EventBus --> Sanitizer
-    EventBus --> Redis
     EventBus --> PG
+    EventBus --> Redis
+    Redis -.->|Rehydrate on Crash| PG
+    EventBus --> Sanitizer
     Sanitizer -->|Tailored Private/Public State| WSS
-    EventBus -.->|Async Narrative Trigger| Queue
+    EventBus -.->|Async Non-Blocking Narrative Job| Queue
     Queue --> LLM
     LLM -.->|Markdown Lore Chunk| EventBus
     Queue -.->|On Timeout 3s| Fallback
@@ -162,9 +163,17 @@ export function gameReducer(state: GameState, event: GameEvent): GameState {
 }
 ```
 
+### 3.3 Persistence Source of Truth Hierarchy
+- **PostgreSQL (Historical Source of Truth)**: Persists the immutable, append-only log of all `GameEvent` records and historical match transcripts. In the event of an engine failure, cache eviction, or server migration, the entire match history and canonical state can be reconstructed deterministically by replaying events from PostgreSQL.
+- **Redis (Ephemeral State, Fast Cache & Pub/Sub)**: Maintains active room sessions, socket presence, heartbeat TTLs, and distributed lock coordination. Redis is strictly an ephemeral operational layer—never an irreplaceable historical data repository.
+
 ---
 
 ## 4. Multiplayer Security, Session Auth & Reconnection Protocol
+
+> [!CAUTION]
+> **Secrets Isolation Invariant (Zero Client Exposure)**:
+> `serverSignature` HMAC-SHA256 secrets, JWT signing private keys, and AI provider API keys MUST reside exclusively in server-side environment variables (`.env`, secret manager). They must NEVER be prefixed with `NEXT_PUBLIC_*`, bundled into frontend client code, exposed to WebSocket frames, or stored in client `localStorage`.
 
 ### 4.1 Threat Model & Countermeasures
 
@@ -306,36 +315,61 @@ sequenceDiagram
     end
 ```
 
-### 6.1 Strict Fallback Invariant
-If the LLM worker experiences rate limits, network timeouts, or invalid JSON output, the game engine **never freezes**. The deterministic template subsystem takes over with zero latency.
+### 6.1 Asynchronous Non-Blocking Narrative Invariant
+The game engine resolves state and produces factual game events synchronously, returning the updated state immediately:
+```typescript
+const updatedState = resolveNightPhase(currentState, completedActions);
+
+// Non-blocking fire-and-forget job dispatch to BullMQ worker
+narrativeQueue.add("GENERATE_LORE", {
+  roomId: currentState.roomId,
+  factualBatch: extractSanitizedFacts(updatedState),
+});
+
+return updatedState; // Match loop proceeds with zero latency!
+```
+The game engine **NEVER** `await`s the LLM. If the AI worker times out (3000ms threshold) or fails, the deterministic procedural template generator delivers the lore chunk instantly with zero stall to the match lifecycle.
 
 ---
 
-## 7. Migration & Engineering Roadmap (SOURCE 6 to v1.0)
+## 7. Migration & Engineering Roadmap (SOURCE 7 to v1.0)
+
+To prevent breaking the mature, verified engine baseline, migration proceeds in 8 sequential phases:
 
 ```mermaid
 gantt
-    title ASPIRE Production Migration Roadmap
+    title ASPIRE Production Migration Roadmap (Phase 0 to Phase 8)
     dateFormat  YYYY-MM-DD
-    section Phase 1: Engine Freeze
-    Lock SOURCE(6) Baseline               :done, 2026-09-08, 1d
-    Formalize 75-Role Contract Matrix     :active, 2026-09-09, 3d
-    Comprehensive Contract Test Suite      :2026-09-12, 3d
-
+    section Phase 0: Baseline Freeze
+    Lock SOURCE(7) Golden Baseline        :done, 2026-09-08, 1d
+    section Phase 1: Contract Lock
+    Formalize 12 Canonical Contracts      :active, 2026-09-09, 2d
     section Phase 2: Authoritative Server
-    Node.js / Fastify WSS Game Gateway    :2026-09-15, 5d
-    Session Auth & Reconnection Protocol  :2026-09-20, 4d
-    Redis Room State & Fog-of-War Sync    :2026-09-24, 4d
-
-    section Phase 3: AI Decoupling & Queue
-    BullMQ Background Worker Setup        :2026-09-28, 3d
-    Deterministic Procedural Fallbacks    :2026-10-01, 2d
-
-    section Phase 4: Production Hardening
-    Load Testing (100 concurrent rooms)   :2026-10-03, 4d
-    Docker Containerization & CI/CD       :2026-10-07, 3d
-    Final v1.0 Production Launch          :2026-10-10, 1d
+    Fastify WSS Gateway & Session Auth    :2026-09-11, 4d
+    section Phase 3: Move Engine Core
+    Port Deterministic Resolvers to Server:2026-09-15, 3d
+    section Phase 4: Event Persistence
+    PostgreSQL Event Store & Replay       :2026-09-18, 3d
+    section Phase 5: Ephemeral Cache
+    Redis Rooms, Sessions & Presence      :2026-09-21, 3d
+    section Phase 6: Stateful Reconnection
+    Monotonic Sequence & Delta Replay     :2026-09-24, 3d
+    section Phase 7: AI Worker Queue
+    BullMQ Async Worker & Fallback        :2026-09-27, 3d
+    section Phase 8: Production Hardening
+    Docker, Load Testing & Monitoring     :2026-09-30, 4d
 ```
+
+### Phase Breakdown:
+1. **Phase 0 — Baseline Freeze (SOURCE 7)**: Lock engine behavior as the Golden Reference. Zero engine modifications while building server infrastructure.
+2. **Phase 1 — Contract Lock**: Formalize the 12 Canonical Contracts (`src/contracts/index.ts`) defining GameState, Commands, Events, Roles, Actions, Death, Vote, Win, Transformation, Fog-of-War, Reconnect, and Narrative.
+3. **Phase 2 — Authoritative Server Core**: Stand up Fastify + WebSocket (WSS) gateway with JWT session authentication to eliminate client-side impersonation.
+4. **Phase 3 — Move Engine Modules**: Migrate existing deterministic modules (`abilityRegistry`, `actionResolver`, `deathResolver`, `voteResolver`, `winEngine`, `roleTransformation`) onto the server with zero regression.
+5. **Phase 4 — Persistence (Event Store)**: Configure PostgreSQL append-only event table for immutable historical match logs and replayability.
+6. **Phase 5 — Redis Ephemeral Layer**: Deploy Redis for high-speed active room state, presence tracking, heartbeat TTLs, and distributed locking.
+7. **Phase 6 — Stateful Reconnection**: Implement sequence-number-based event replay so clients reconnect seamlessly after network disconnects.
+8. **Phase 7 — Asynchronous AI Narrative**: Deploy BullMQ worker with 3-second timeout and instant procedural fallback templates.
+9. **Phase 8 — Production Hardening**: Containerization with Docker, CI/CD pipelines, rate limiting, and 100-room concurrency testing.
 
 ---
 
