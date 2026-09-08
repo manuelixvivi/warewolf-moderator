@@ -384,6 +384,11 @@ export class RoomManager {
       cascadeCasualties: deathChain.chainCasualties || [],
     });
 
+    // Advance to Day Phase
+    room.dayCount += 1;
+    room.votes = {};
+    room.nightActions = [];
+
     // Check Win Conditions
     const winResult = evaluateWinConditions(room.players, { timeoutCount: room.timeoutCount });
     if (winResult.gameEnded) {
@@ -392,11 +397,7 @@ export class RoomManager {
       return room;
     }
 
-    // Advance to Day Phase
-    room.dayCount += 1;
     room.phase = "DAY_DISCUSSION";
-    room.votes = {};
-    room.nightActions = [];
 
     this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
       phase: "DAY_DISCUSSION",

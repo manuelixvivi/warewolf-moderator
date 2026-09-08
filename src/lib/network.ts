@@ -1,8 +1,9 @@
 // ============================================================
-// ASPIRE: WEREWOLF - High-Reliability Realtime Network Engine
-// Uses Secure WebSocket MQTT (WSS) to guarantee cross-network
-// connectivity across different Wi-Fi, mobile 4G/5G, and firewalls
-// + BroadcastChannel for local instant multi-tab sync
+// ASPIRE: WEREWOLF - Legacy Prototype Network Engine
+// @deprecated
+// DEPRECATED in Phase 3. Retained as fallback during migration.
+// Primary network transport is now Authoritative WebSocket Client:
+// import { authoritativeWsClient } from "@/lib/network";
 // ============================================================
 
 import { NetworkMessage } from "@/types/game";
