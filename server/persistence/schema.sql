@@ -44,3 +44,14 @@ CREATE TABLE IF NOT EXISTS game_events (
 
 CREATE INDEX IF NOT EXISTS idx_game_events_room_seq ON game_events(room_id, sequence ASC);
 CREATE INDEX IF NOT EXISTS idx_game_events_type ON game_events(event_type);
+
+CREATE TABLE IF NOT EXISTS processed_commands (
+    command_id VARCHAR(128) PRIMARY KEY,
+    room_id VARCHAR(64) NOT NULL REFERENCES matches(room_id) ON DELETE CASCADE,
+    sender_id VARCHAR(64) NOT NULL,
+    command_type VARCHAR(64) NOT NULL,
+    processed_at BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_commands_room ON processed_commands(room_id);
+

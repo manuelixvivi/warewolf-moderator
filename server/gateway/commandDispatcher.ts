@@ -15,6 +15,7 @@ import { CommandValidationResult, AuthoritativeRoomState } from "../types";
 import { SessionManager } from "../auth/sessionManager";
 import { RoomManager } from "../rooms/roomManager";
 import { FogOfWarDispatcher } from "./fogOfWarDispatcher";
+import { defaultEventStore } from "../persistence";
 
 export class CommandDispatcher {
   /**
@@ -166,13 +167,16 @@ export class CommandDispatcher {
 
   /**
    * Executes a validated command and dispatches state updates.
+   * STRICT PERSISTENCE INVARIANT:
+   * Awaits database persistence before confirming state mutation and dispatching to clients.
+   * Persistent idempotency store ensures duplicate commands are rejected even after server restart.
    */
-  public static handleCommand(rawMessage: string): {
+  public static async handleCommand(rawMessage: string): Promise<{
     success: boolean;
     error?: string;
     errorCode?: string;
     isDuplicate?: boolean;
-  } {
+  }> {
     let rawParsed: any;
     try {
       rawParsed = JSON.parse(rawMessage);
@@ -185,8 +189,7 @@ export class CommandDispatcher {
 
     const validation = this.validateCommand(rawMessage, room);
     if (validation.isDuplicate) {
-      // Idempotency guarantee: command was already successfully processed.
-      // Acknowledge without re-executing state mutation or emitting duplicate events.
+      // Fast-path in-memory idempotency check
       return { success: true, isDuplicate: true };
     }
 
@@ -196,6 +199,14 @@ export class CommandDispatcher {
 
     const { command } = validation;
 
+    // Crash-safe persistent idempotency check
+    const isPersistentDuplicate = await defaultEventStore.isCommandProcessed(command.roomId, command.commandId);
+    if (isPersistentDuplicate) {
+      if (!room.processedCommandIds) room.processedCommandIds = new Set();
+      room.processedCommandIds.add(command.commandId);
+      return { success: true, isDuplicate: true };
+    }
+
     try {
       switch (command.type) {
         case "TOGGLE_READY": {
@@ -204,13 +215,13 @@ export class CommandDispatcher {
         }
 
         case "START_GAME": {
-          RoomManager.startGame(command.roomId, command.senderId, command.payload);
+          await RoomManager.startGame(command.roomId, command.senderId, command.payload);
           break;
         }
 
         case "SUBMIT_NIGHT_ACTION": {
           const payload = command.payload as SubmitNightActionCommandPayload;
-          RoomManager.submitNightAction(
+          await RoomManager.submitNightAction(
             command.roomId,
             command.senderId,
             payload.actionId,
@@ -222,7 +233,7 @@ export class CommandDispatcher {
 
         case "CAST_VOTE": {
           const payload = command.payload as CastVoteCommandPayload;
-          RoomManager.submitVote(
+          await RoomManager.submitVote(
             command.roomId,
             command.senderId,
             payload.targetPlayerId
@@ -234,7 +245,15 @@ export class CommandDispatcher {
           return { success: false, error: `Unsupported command type: ${command.type}`, errorCode: "INVALID_SCHEMA" };
       }
 
-      // Idempotency: Register commandId as successfully processed
+      // Record command persistently for crash-safe idempotency
+      await defaultEventStore.recordCommand({
+        commandId: command.commandId,
+        roomId: command.roomId,
+        senderId: command.senderId,
+        commandType: command.type,
+      });
+
+      // Update in-memory registry
       if (!room.processedCommandIds) {
         room.processedCommandIds = new Set<string>();
       }

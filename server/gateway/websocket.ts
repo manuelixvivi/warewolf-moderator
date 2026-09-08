@@ -62,9 +62,9 @@ export async function registerWebSocketGateway(fastify: FastifyInstance): Promis
     FogOfWarDispatcher.dispatchRoomSync(room);
 
     // Handle incoming frames
-    socket.on("message", (raw: Buffer | string) => {
+    socket.on("message", async (raw: Buffer | string) => {
       const messageStr = raw.toString();
-      const result = CommandDispatcher.handleCommand(messageStr);
+      const result = await CommandDispatcher.handleCommand(messageStr);
 
       if (!result.success) {
         socket.send(

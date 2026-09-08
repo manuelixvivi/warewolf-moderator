@@ -229,7 +229,7 @@ async function runServerTestSuite() {
       clientTimestamp: Date.now(),
     };
 
-    const startResult = CommandDispatcher.handleCommand(JSON.stringify(startGameCommand));
+    const startResult = await CommandDispatcher.handleCommand(JSON.stringify(startGameCommand));
     assert(startResult.success === true, "[Lifecycle] Host START_GAME executed successfully");
 
     const room = RoomManager.getRoom(testRoomId)!;
@@ -279,11 +279,11 @@ async function runServerTestSuite() {
     const room = RoomManager.getRoom(testRoomId)!;
 
     // Simulate disconnect of Bob (p2)
-    RoomManager.handleClientDisconnect(testRoomId, "p2");
+    await RoomManager.handleClientDisconnect(testRoomId, "p2");
     assert(room.disconnectTimers.has("p2"), "[Reconnection] Disconnect grace timer registered for p2");
 
     // Simulate immediate reconnection of Bob
-    RoomManager.registerClientSocket("sock-new-bob", {} as any, "p2", testRoomId);
+    await RoomManager.registerClientSocket("sock-new-bob", {} as any, "p2", testRoomId);
     assert(!room.disconnectTimers.has("p2"), "[Reconnection] Reconnection cleared grace timer");
 
     const reconnectedEvent = room.eventLog.find((e) => e.type === "PLAYER_RECONNECTED");

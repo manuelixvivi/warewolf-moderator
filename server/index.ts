@@ -46,7 +46,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     }
 
     try {
-      const { room, sessionToken } = RoomManager.createRoom(
+      const { room, sessionToken } = await RoomManager.createRoom(
         hostPlayerId,
         hostPlayerName,
         gameMode || "MODE_1_FIXED",
@@ -75,7 +75,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     }
 
     try {
-      const { room, sessionToken } = RoomManager.joinRoom(roomId, playerId, playerName);
+      const { room, sessionToken } = await RoomManager.joinRoom(roomId, playerId, playerName);
       const publicState = FogOfWarDispatcher.buildPublicState(room);
       return reply.status(200).send({
         roomId: room.roomId,

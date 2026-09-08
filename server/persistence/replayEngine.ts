@@ -334,6 +334,15 @@ export class ReplayEngine {
       state = this.gameReducer(state, event);
     }
 
+    // Restore persistent command idempotency registry so deduplication survives crashes
+    if (state) {
+      const persistedCommands = await eventStore.getProcessedCommandIds(roomId);
+      state.processedCommandIds = new Set([
+        ...(state.processedCommandIds ? Array.from(state.processedCommandIds) : []),
+        ...Array.from(persistedCommands),
+      ]);
+    }
+
     return state;
   }
 

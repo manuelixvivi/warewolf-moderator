@@ -1,7 +1,8 @@
 // ============================================================
 // ASPIRE: WEREWOLF — EventStore Repository
 // Append-Only Event Store Implementation (PostgreSQL + In-Memory Fallback)
-// "Event Store is the Canonical Source of Truth."
+// "Event Store is the Canonical Source of Truth.
+//  PostgreSQL = Historical Truth. State = Projection(Events[1..N])."
 // ============================================================
 
 import { Pool, PoolClient } from "pg";
@@ -19,13 +20,35 @@ export interface MatchRecord {
   updatedAt?: number;
 }
 
+export interface CommandRecord {
+  commandId: string;
+  roomId: string;
+  senderId: string;
+  commandType: string;
+  processedAt?: number;
+}
+
 export interface IEventStore {
   saveMatch(match: MatchRecord): Promise<void>;
+  saveParticipant?(participant: {
+    roomId: string;
+    playerId: string;
+    playerName: string;
+    isHost?: boolean;
+    roleId?: string;
+    canonicalName?: string;
+    team?: string;
+    alive?: boolean;
+    joinedAt?: number;
+  }): Promise<void>;
   appendEvent<T = any>(event: GameEvent<T>): Promise<void>;
   appendBatch(events: GameEvent[]): Promise<void>;
   getEvents(roomId: string, fromSequence?: number, toSequence?: number): Promise<GameEvent[]>;
   getLatestSequence(roomId: string): Promise<number>;
   hasMatch(roomId: string): Promise<boolean>;
+  recordCommand(cmd: CommandRecord): Promise<void>;
+  isCommandProcessed(roomId: string, commandId: string): Promise<boolean>;
+  getProcessedCommandIds(roomId: string): Promise<Set<string>>;
   clearRoom?(roomId: string): Promise<void>;
 }
 
@@ -58,6 +81,20 @@ export class PostgresEventStore implements IEventStore {
           updated_at BIGINT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS match_participants (
+          id SERIAL PRIMARY KEY,
+          room_id VARCHAR(64) NOT NULL REFERENCES matches(room_id) ON DELETE CASCADE,
+          player_id VARCHAR(64) NOT NULL,
+          player_name VARCHAR(128) NOT NULL,
+          role_id VARCHAR(32),
+          canonical_name VARCHAR(64),
+          team VARCHAR(32),
+          alive BOOLEAN NOT NULL DEFAULT TRUE,
+          is_host BOOLEAN NOT NULL DEFAULT FALSE,
+          joined_at BIGINT NOT NULL,
+          UNIQUE (room_id, player_id)
+      );
+
       CREATE TABLE IF NOT EXISTS game_events (
           event_id UUID NOT NULL,
           room_id VARCHAR(64) NOT NULL REFERENCES matches(room_id) ON DELETE CASCADE,
@@ -71,6 +108,17 @@ export class PostgresEventStore implements IEventStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_game_events_room_seq ON game_events(room_id, sequence ASC);
+      CREATE INDEX IF NOT EXISTS idx_game_events_type ON game_events(event_type);
+
+      CREATE TABLE IF NOT EXISTS processed_commands (
+          command_id VARCHAR(128) PRIMARY KEY,
+          room_id VARCHAR(64) NOT NULL REFERENCES matches(room_id) ON DELETE CASCADE,
+          sender_id VARCHAR(64) NOT NULL,
+          command_type VARCHAR(64) NOT NULL,
+          processed_at BIGINT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_processed_commands_room ON processed_commands(room_id);
     `;
 
     const client = await this.pool.connect();
@@ -100,6 +148,40 @@ export class PostgresEventStore implements IEventStore {
       match.status || "ACTIVE",
       match.createdAt || now,
       match.updatedAt || now,
+    ]);
+  }
+
+  public async saveParticipant(p: {
+    roomId: string;
+    playerId: string;
+    playerName: string;
+    isHost?: boolean;
+    roleId?: string;
+    canonicalName?: string;
+    team?: string;
+    alive?: boolean;
+    joinedAt?: number;
+  }): Promise<void> {
+    await this.init();
+    const query = `
+      INSERT INTO match_participants (room_id, player_id, player_name, role_id, canonical_name, team, alive, is_host, joined_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (room_id, player_id) DO UPDATE
+      SET role_id = EXCLUDED.role_id,
+          canonical_name = EXCLUDED.canonical_name,
+          team = EXCLUDED.team,
+          alive = EXCLUDED.alive;
+    `;
+    await this.pool.query(query, [
+      p.roomId,
+      p.playerId,
+      p.playerName,
+      p.roleId || null,
+      p.canonicalName || null,
+      p.team || null,
+      p.alive !== undefined ? p.alive : true,
+      p.isHost || false,
+      p.joinedAt || Date.now(),
     ]);
   }
 
@@ -187,6 +269,36 @@ export class PostgresEventStore implements IEventStore {
     return (res.rowCount ?? 0) > 0;
   }
 
+  public async recordCommand(cmd: CommandRecord): Promise<void> {
+    await this.init();
+    const query = `
+      INSERT INTO processed_commands (command_id, room_id, sender_id, command_type, processed_at)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (command_id) DO NOTHING;
+    `;
+    await this.pool.query(query, [
+      cmd.commandId,
+      cmd.roomId,
+      cmd.senderId,
+      cmd.commandType,
+      cmd.processedAt || Date.now(),
+    ]);
+  }
+
+  public async isCommandProcessed(roomId: string, commandId: string): Promise<boolean> {
+    await this.init();
+    const query = `SELECT 1 FROM processed_commands WHERE command_id = $1 AND room_id = $2;`;
+    const res = await this.pool.query(query, [commandId, roomId]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  public async getProcessedCommandIds(roomId: string): Promise<Set<string>> {
+    await this.init();
+    const query = `SELECT command_id as "commandId" FROM processed_commands WHERE room_id = $1;`;
+    const res = await this.pool.query(query, [roomId]);
+    return new Set(res.rows.map((r) => r.commandId));
+  }
+
   public async clearRoom(roomId: string): Promise<void> {
     await this.init();
     await this.pool.query(`DELETE FROM matches WHERE room_id = $1`, [roomId]);
@@ -198,18 +310,43 @@ export class PostgresEventStore implements IEventStore {
 }
 
 /**
- * In-Memory Event Store for environments without active PostgreSQL instances.
- * Enforces identical constraints: monotonic sequences, unique (room_id, sequence) keys.
+ * In-Memory Event Store for test environments & environments without active PostgreSQL.
+ * Enforces identical constraints: monotonic sequences, unique (room_id, sequence) keys,
+ * and persistent command idempotency.
  */
 export class InMemoryEventStore implements IEventStore {
   private matches = new Map<string, MatchRecord>();
+  private participants = new Map<string, Map<string, any>>();
   private eventsByRoom = new Map<string, GameEvent[]>();
+  private processedCommandsByRoom = new Map<string, Set<string>>();
 
   public async saveMatch(match: MatchRecord): Promise<void> {
     this.matches.set(match.roomId, { ...match });
     if (!this.eventsByRoom.has(match.roomId)) {
       this.eventsByRoom.set(match.roomId, []);
     }
+    if (!this.processedCommandsByRoom.has(match.roomId)) {
+      this.processedCommandsByRoom.set(match.roomId, new Set());
+    }
+  }
+
+  public async saveParticipant(p: {
+    roomId: string;
+    playerId: string;
+    playerName: string;
+    isHost?: boolean;
+    roleId?: string;
+    canonicalName?: string;
+    team?: string;
+    alive?: boolean;
+    joinedAt?: number;
+  }): Promise<void> {
+    let roomParts = this.participants.get(p.roomId);
+    if (!roomParts) {
+      roomParts = new Map();
+      this.participants.set(p.roomId, roomParts);
+    }
+    roomParts.set(p.playerId, { ...p });
   }
 
   public async appendEvent<T = any>(event: GameEvent<T>): Promise<void> {
@@ -219,7 +356,7 @@ export class InMemoryEventStore implements IEventStore {
       this.eventsByRoom.set(event.roomId, list);
     }
 
-    // Constraint: (room_id, sequence) must be strictly unique & monotonic
+    // Strict constraint: (room_id, sequence) must be unique
     const existing = list.find((e) => e.sequence === event.sequence);
     if (existing) {
       throw new Error(
@@ -232,9 +369,30 @@ export class InMemoryEventStore implements IEventStore {
   }
 
   public async appendBatch(events: GameEvent[]): Promise<void> {
-    for (const e of events) {
-      await this.appendEvent(e);
+    if (events.length === 0) return;
+    const roomId = events[0].roomId;
+    let list = this.eventsByRoom.get(roomId);
+    if (!list) {
+      list = [];
+      this.eventsByRoom.set(roomId, list);
     }
+
+    // Atomic pre-validation: verify no duplicate sequences in batch or store
+    const existingSeqs = new Set(list.map((e) => e.sequence));
+    for (const e of events) {
+      if (existingSeqs.has(e.sequence)) {
+        throw new Error(
+          `Unique constraint violation in batch: Sequence ${e.sequence} already exists for room ${e.roomId}.`
+        );
+      }
+      existingSeqs.add(e.sequence);
+    }
+
+    // Commit batch atomically
+    for (const e of events) {
+      list.push({ ...e });
+    }
+    list.sort((a, b) => a.sequence - b.sequence);
   }
 
   public async getEvents(
@@ -258,9 +416,30 @@ export class InMemoryEventStore implements IEventStore {
     return this.matches.has(roomId);
   }
 
+  public async recordCommand(cmd: CommandRecord): Promise<void> {
+    let set = this.processedCommandsByRoom.get(cmd.roomId);
+    if (!set) {
+      set = new Set();
+      this.processedCommandsByRoom.set(cmd.roomId, set);
+    }
+    set.add(cmd.commandId);
+  }
+
+  public async isCommandProcessed(roomId: string, commandId: string): Promise<boolean> {
+    const set = this.processedCommandsByRoom.get(roomId);
+    return set ? set.has(commandId) : false;
+  }
+
+  public async getProcessedCommandIds(roomId: string): Promise<Set<string>> {
+    const set = this.processedCommandsByRoom.get(roomId);
+    return set ? new Set(set) : new Set();
+  }
+
   public async clearRoom(roomId: string): Promise<void> {
     this.matches.delete(roomId);
+    this.participants.delete(roomId);
     this.eventsByRoom.delete(roomId);
+    this.processedCommandsByRoom.delete(roomId);
   }
 }
 

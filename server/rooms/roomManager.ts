@@ -1,7 +1,8 @@
 // ============================================================
 // ASPIRE: WEREWOLF — Authoritative Room Manager
 // State Machine & Lifecycle Authority
-// "Server owns the state. Engine resolves truth."
+// "Server owns the state. Engine resolves truth.
+//  PostgreSQL = Canonical Historical Truth. State = Projection(Event[1..N])."
 // ============================================================
 
 import { v4 as uuidv4 } from "uuid";
@@ -57,21 +58,23 @@ export class RoomManager {
 
   /**
    * Appends an immutable GameEvent to the room's event store.
+   * STRICT PERSISTENCE INVARIANT:
+   * Awaits PostgreSQL event store commit BEFORE updating authoritative state in RAM.
+   * If database persistence fails, state is NOT updated and error is thrown.
    */
-  public static appendEvent<T = any>(
+  public static async appendEvent<T = any>(
     room: AuthoritativeRoomState,
     type: GameEventType,
     actorId: string | undefined,
     payload: T
-  ): GameEvent<T> {
-    room.sequenceNumber += 1;
-    const sequence = room.sequenceNumber;
-    const signature = signGameEvent(room.roomId, sequence, type, payload);
+  ): Promise<GameEvent<T>> {
+    const candidateSequence = room.sequenceNumber + 1;
+    const signature = signGameEvent(room.roomId, candidateSequence, type, payload);
 
     const event: GameEvent<T> = {
       eventId: uuidv4(),
       roomId: room.roomId,
-      sequence,
+      sequence: candidateSequence,
       timestamp: Date.now(),
       type,
       actorId,
@@ -79,25 +82,65 @@ export class RoomManager {
       serverSignature: signature,
     };
 
-    room.eventLog.push(event);
-    room.updatedAt = Date.now();
+    // 1. AWAIT database append first (strict historical truth before RAM commit)
+    await defaultEventStore.appendEvent(event);
 
-    defaultEventStore.appendEvent(event).catch(() => {
-      // Event persistence error logged
-    });
+    // 2. Only upon successful persistence commit, update authoritative state in RAM
+    room.sequenceNumber = candidateSequence;
+    room.eventLog.push(event);
+    room.updatedAt = event.timestamp;
 
     return event;
   }
 
   /**
+   * Appends a batch of immutable GameEvents atomically.
+   * All events are committed in a single database transaction.
+   * Authoritative state in RAM is only updated if the entire batch succeeds.
+   */
+  public static async appendBatch(
+    room: AuthoritativeRoomState,
+    eventsToCommit: Array<{ type: GameEventType; actorId?: string; payload: any }>
+  ): Promise<GameEvent[]> {
+    if (eventsToCommit.length === 0) return [];
+
+    let currentSeq = room.sequenceNumber;
+    const preparedEvents: GameEvent[] = eventsToCommit.map((item) => {
+      currentSeq++;
+      return {
+        eventId: uuidv4(),
+        roomId: room.roomId,
+        sequence: currentSeq,
+        timestamp: Date.now(),
+        type: item.type,
+        actorId: item.actorId,
+        payload: item.payload,
+        serverSignature: signGameEvent(room.roomId, currentSeq, item.type, item.payload),
+      };
+    });
+
+    // 1. AWAIT atomic batch persistence (transactional BEGIN ... COMMIT)
+    await defaultEventStore.appendBatch(preparedEvents);
+
+    // 2. Commit to RAM state only after database transaction succeeds
+    room.sequenceNumber = currentSeq;
+    for (const event of preparedEvents) {
+      room.eventLog.push(event);
+    }
+    room.updatedAt = Date.now();
+
+    return preparedEvents;
+  }
+
+  /**
    * Creates a new authoritative room.
    */
-  public static createRoom(
+  public static async createRoom(
     hostPlayerId: string,
     hostPlayerName: string,
     gameMode: AuthoritativeRoomState["gameMode"] = "MODE_1_FIXED",
     customRoomId?: string
-  ): { room: AuthoritativeRoomState; sessionToken: string } {
+  ): Promise<{ room: AuthoritativeRoomState; sessionToken: string }> {
     const roomId = customRoomId || `ROOM-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const hostPlayer: PlayerEngineState = {
@@ -147,15 +190,28 @@ export class RoomManager {
 
     this.rooms.set(roomId, room);
 
-    defaultEventStore.saveMatch({
+    await defaultEventStore.saveMatch({
       roomId,
       gameMode,
       hostPlayerId,
       hostPlayerName,
       status: "ACTIVE",
-    }).catch(() => {});
+    });
 
-    this.appendEvent(room, "ROOM_INITIALIZED", hostPlayerId, {
+    if (defaultEventStore.saveParticipant) {
+      await defaultEventStore.saveParticipant({
+        roomId,
+        playerId: hostPlayerId,
+        playerName: hostPlayerName,
+        isHost: true,
+        roleId: hostPlayer.role_id,
+        canonicalName: hostPlayer.canonical_name,
+        team: hostPlayer.team,
+        alive: true,
+      });
+    }
+
+    await this.appendEvent(room, "ROOM_INITIALIZED", hostPlayerId, {
       roomId,
       gameMode,
       hostPlayerId,
@@ -175,11 +231,11 @@ export class RoomManager {
   /**
    * Joins an existing room in LOBBY phase.
    */
-  public static joinRoom(
+  public static async joinRoom(
     roomId: string,
     playerId: string,
     playerName: string
-  ): { room: AuthoritativeRoomState; sessionToken: string } {
+  ): Promise<{ room: AuthoritativeRoomState; sessionToken: string }> {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error(`Room ${roomId} not found.`);
@@ -217,7 +273,20 @@ export class RoomManager {
       };
       room.players.push(existingPlayer);
 
-      this.appendEvent(room, "PLAYER_JOINED", playerId, {
+      if (defaultEventStore.saveParticipant) {
+        await defaultEventStore.saveParticipant({
+          roomId,
+          playerId,
+          playerName,
+          isHost: false,
+          roleId: existingPlayer.role_id,
+          canonicalName: existingPlayer.canonical_name,
+          team: existingPlayer.team,
+          alive: true,
+        });
+      }
+
+      await this.appendEvent(room, "PLAYER_JOINED", playerId, {
         playerId,
         playerName,
       });
@@ -250,43 +319,56 @@ export class RoomManager {
   }
 
   /**
-   * Starts game and assigns roles using golden engine balance algorithms.
+   * Starts the match from LOBBY: assigns roles via Golden Engine balance logic
+   * and transitions to NIGHT_ACTIVE in a single atomic database batch.
    */
-  public static startGame(
+  public static async startGame(
     roomId: string,
     hostPlayerId: string,
-    options?: { poolRoles?: SelectedRole[]; fixedRoles?: SelectedRole[] }
-  ): AuthoritativeRoomState {
+    options?: {
+      selectedRolePool?: string[];
+      fixedRoles?: SelectedRole[];
+    }
+  ): Promise<AuthoritativeRoomState> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
-    if (room.hostPlayerId !== hostPlayerId) throw new Error("Only the host can start the game.");
-    if (room.phase !== "LOBBY") throw new Error(`Cannot start game in phase ${room.phase}.`);
+    if (room.phase !== "LOBBY") throw new Error(`Cannot start game from phase ${room.phase}.`);
+    if (room.hostPlayerId !== hostPlayerId) {
+      throw new Error("Only the host can start the game.");
+    }
 
     const playerCount = room.players.length;
     if (playerCount < MINIMUM_PLAYERS) {
-      throw new Error(`Minimal ${MINIMUM_PLAYERS} pemain dibutuhkan untuk memulai permainan.`);
+      throw new Error(`Minimum ${MINIMUM_PLAYERS} players required to start.`);
     }
 
-    // Role Assignment via Golden Engine
-    let assignedRoleDefs: any[] = [];
+    // Role Distribution Logic according to game mode
+    let assignedRoleDefs: typeof ALL_ROLES = [];
 
-    if (room.gameMode === "MODE_2_POOL" && options?.poolRoles && options.poolRoles.length > 0) {
-      assignedRoleDefs = selectBalancedSubsetFromPool(options.poolRoles, playerCount);
-    } else if (room.gameMode === "MODE_1_FIXED" && options?.fixedRoles && options.fixedRoles.length > 0) {
-      const expanded: any[] = [];
-      for (const sr of options.fixedRoles) {
-        const rDef = ROLE_BY_ID.get(sr.role_id) || ALL_ROLES.find((r) => r.role_id === sr.role_id);
-        if (rDef) {
-          for (let i = 0; i < sr.count; i++) expanded.push(rDef);
+    if (options?.fixedRoles && options.fixedRoles.length > 0) {
+      const expanded: typeof ALL_ROLES = [];
+      for (const sel of options.fixedRoles) {
+        const def = ROLE_BY_ID.get(sel.role_id);
+        if (def) {
+          for (let i = 0; i < sel.count; i++) expanded.push(def);
         }
       }
       assignedRoleDefs = shuffleRoles(expanded);
+    } else if (room.gameMode === "MODE_2_POOL" && options?.selectedRolePool) {
+      const poolRoles: SelectedRole[] = options.selectedRolePool.map((id) => {
+        const def = ROLE_BY_ID.get(id);
+        return {
+          role_id: id,
+          canonical_name: def?.canonical_name || "Unknown",
+          count: 1,
+        };
+      });
+      assignedRoleDefs = selectBalancedSubsetFromPool(poolRoles, playerCount);
     } else {
-      // Default to Mode 3 dynamic balance
       assignedRoleDefs = generateBalancedRandomComposition(playerCount);
     }
 
-    // Assign roles to players
+    // Mutate internal player entities with assigned roles
     room.players.forEach((p, idx) => {
       const role = assignedRoleDefs[idx] || ALL_ROLES[0];
       p.role_id = role.role_id;
@@ -322,21 +404,33 @@ export class RoomManager {
     // Build night actions for Night 1
     room.nightActions = buildEngineNightActions(room.players, room.nightCount, false);
 
-    this.appendEvent(room, "GAME_STARTED", hostPlayerId, {
-      playerCount,
-      gameMode: room.gameMode,
-    });
-
-    this.appendEvent(room, "ROLES_ASSIGNED", hostPlayerId, {
-      assignedCount: playerCount,
-      assignments: room.players.map((p) => ({ playerId: p.id, role_id: p.role_id })),
-    });
-
-    this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
-      phase: "NIGHT_ACTIVE",
-      nightCount: room.nightCount,
-      dayCount: room.dayCount,
-    });
+    // ATOMIC PERSISTENCE: Commit GAME_STARTED, ROLES_ASSIGNED, and PHASE_TRANSITIONED together
+    await this.appendBatch(room, [
+      {
+        type: "GAME_STARTED",
+        actorId: hostPlayerId,
+        payload: {
+          playerCount,
+          gameMode: room.gameMode,
+        },
+      },
+      {
+        type: "ROLES_ASSIGNED",
+        actorId: hostPlayerId,
+        payload: {
+          assignedCount: playerCount,
+          assignments: room.players.map((p) => ({ playerId: p.id, role_id: p.role_id })),
+        },
+      },
+      {
+        type: "PHASE_TRANSITIONED",
+        payload: {
+          phase: "NIGHT_ACTIVE",
+          nightCount: room.nightCount,
+          dayCount: room.dayCount,
+        },
+      },
+    ]);
 
     return room;
   }
@@ -344,13 +438,13 @@ export class RoomManager {
   /**
    * Submits a night action. If all completed, automatically resolves night!
    */
-  public static submitNightAction(
+  public static async submitNightAction(
     roomId: string,
     actorPlayerId: string,
     actionId: string,
     targetPlayerId: string | null,
     secondaryTargetId?: string | null
-  ): { room: AuthoritativeRoomState; resolved: boolean } {
+  ): Promise<{ room: AuthoritativeRoomState; resolved: boolean }> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
     if (room.phase !== "NIGHT_ACTIVE") {
@@ -369,7 +463,7 @@ export class RoomManager {
     action.secondary_target_id = secondaryTargetId || null;
     action.completed = true;
 
-    this.appendEvent(room, "NIGHT_ACTION_SUBMITTED", actorPlayerId, {
+    await this.appendEvent(room, "NIGHT_ACTION_SUBMITTED", actorPlayerId, {
       actionId,
       targetPlayerId,
     });
@@ -377,7 +471,7 @@ export class RoomManager {
     // Check if all actions completed
     const allCompleted = room.nightActions.every((a) => a.completed);
     if (allCompleted) {
-      this.resolveNightPhase(room);
+      await this.resolveNightPhase(room);
       return { room, resolved: true };
     }
 
@@ -386,8 +480,9 @@ export class RoomManager {
 
   /**
    * Resolves the night phase using the Golden Engine modules.
+   * Commits results in an atomic database transaction.
    */
-  public static resolveNightPhase(room: AuthoritativeRoomState): AuthoritativeRoomState {
+  public static async resolveNightPhase(room: AuthoritativeRoomState): Promise<AuthoritativeRoomState> {
     room.phase = "NIGHT_RESOLVING";
 
     const { updatedPlayers, outcome } = resolveNightActions(
@@ -405,12 +500,6 @@ export class RoomManager {
 
     room.players = deathChain.updatedPlayers;
 
-    this.appendEvent(room, "NIGHT_RESOLVED", undefined, {
-      killedPlayerIds: outcome.killedPlayerIds,
-      savedPlayerIds: outcome.savedPlayerIds,
-      cascadeCasualties: deathChain.chainCasualties || [],
-    });
-
     // Advance to Day Phase
     room.dayCount += 1;
     room.votes = {};
@@ -418,27 +507,44 @@ export class RoomManager {
 
     // Check Win Conditions
     const winResult = evaluateWinConditions(room.players, { timeoutCount: room.timeoutCount });
+
+    const batch: Array<{ type: GameEventType; payload: any }> = [
+      {
+        type: "NIGHT_RESOLVED",
+        payload: {
+          killedPlayerIds: outcome.killedPlayerIds,
+          savedPlayerIds: outcome.savedPlayerIds,
+          cascadeCasualties: deathChain.chainCasualties || [],
+        },
+      },
+    ];
+
     if (winResult.gameEnded) {
       room.phase = "GAME_OVER";
-      this.appendEvent(room, "WIN_CONDITION_SATISFIED", undefined, winResult);
-      return room;
+      batch.push({
+        type: "WIN_CONDITION_SATISFIED",
+        payload: winResult,
+      });
+    } else {
+      room.phase = "DAY_DISCUSSION";
+      batch.push({
+        type: "PHASE_TRANSITIONED",
+        payload: {
+          phase: "DAY_DISCUSSION",
+          dayCount: room.dayCount,
+          nightCount: room.nightCount,
+        },
+      });
     }
 
-    room.phase = "DAY_DISCUSSION";
-
-    this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
-      phase: "DAY_DISCUSSION",
-      dayCount: room.dayCount,
-      nightCount: room.nightCount,
-    });
-
+    await this.appendBatch(room, batch);
     return room;
   }
 
   /**
    * Transitions from Day Discussion to Day Voting.
    */
-  public static startDayVoting(roomId: string): AuthoritativeRoomState {
+  public static async startDayVoting(roomId: string): Promise<AuthoritativeRoomState> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
     if (room.phase !== "DAY_DISCUSSION") {
@@ -448,7 +554,7 @@ export class RoomManager {
     room.phase = "DAY_VOTING";
     room.votes = {};
 
-    this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
+    await this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
       phase: "DAY_VOTING",
       dayCount: room.dayCount,
       nightCount: room.nightCount,
@@ -460,11 +566,11 @@ export class RoomManager {
   /**
    * Submits a vote during DAY_VOTING.
    */
-  public static submitVote(
+  public static async submitVote(
     roomId: string,
     voterId: string,
     targetPlayerId: string
-  ): { room: AuthoritativeRoomState; resolved: boolean } {
+  ): Promise<{ room: AuthoritativeRoomState; resolved: boolean }> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
     if (room.phase !== "DAY_VOTING") {
@@ -478,7 +584,7 @@ export class RoomManager {
 
     room.votes[voterId] = targetPlayerId;
 
-    this.appendEvent(room, "VOTE_CAST", voterId, {
+    await this.appendEvent(room, "VOTE_CAST", voterId, {
       voterId,
       targetPlayerId,
     });
@@ -488,7 +594,7 @@ export class RoomManager {
     const hasEveryoneVoted = eligibleVoters.every((p) => Boolean(room.votes[p.id]));
 
     if (hasEveryoneVoted) {
-      this.resolveDayVotePhase(room);
+      await this.resolveDayVotePhase(room);
       return { room, resolved: true };
     }
 
@@ -497,17 +603,21 @@ export class RoomManager {
 
   /**
    * Resolves Day Votes using the Golden Engine modules.
+   * Commits results in an atomic database transaction.
    */
-  public static resolveDayVotePhase(
+  public static async resolveDayVotePhase(
     room: AuthoritativeRoomState,
     isTimeout: boolean = false
-  ): AuthoritativeRoomState {
+  ): Promise<AuthoritativeRoomState> {
     room.phase = "DAY_RESOLVING";
+
+    const batch: Array<{ type: GameEventType; payload: any }> = [];
 
     if (isTimeout) {
       room.timeoutCount += 1;
-      this.appendEvent(room, "TIMEOUT_OCCURRED", undefined, {
-        timeoutCount: room.timeoutCount,
+      batch.push({
+        type: "TIMEOUT_OCCURRED",
+        payload: { timeoutCount: room.timeoutCount },
       });
     }
 
@@ -529,46 +639,55 @@ export class RoomManager {
 
     room.players = finalPlayers;
 
-    this.appendEvent(room, "VOTE_RESOLVED", undefined, {
-      tally: outcome.tally,
-      eliminatedPlayerId: outcome.eliminatedPlayer?.id || null,
-      princeSurvived: outcome.princeSurvived,
-      tannerWon: outcome.tannerWon,
-      dayTimerReduced: outcome.dayTimerReduced,
+    batch.push({
+      type: "VOTE_RESOLVED",
+      payload: {
+        tally: outcome.tally,
+        eliminatedPlayerId: outcome.eliminatedPlayer?.id || null,
+        princeSurvived: outcome.princeSurvived,
+        tannerWon: outcome.tannerWon,
+        dayTimerReduced: outcome.dayTimerReduced,
+      },
     });
 
     // Check Win Conditions
     const winResult = evaluateWinConditions(room.players, { timeoutCount: room.timeoutCount });
     if (winResult.gameEnded) {
       room.phase = "GAME_OVER";
-      this.appendEvent(room, "WIN_CONDITION_SATISFIED", undefined, winResult);
-      return room;
+      batch.push({
+        type: "WIN_CONDITION_SATISFIED",
+        payload: winResult,
+      });
+    } else {
+      // Advance to Next Night
+      room.nightCount += 1;
+      room.phase = "NIGHT_ACTIVE";
+      room.votes = {};
+      room.nightActions = buildEngineNightActions(room.players, room.nightCount, false);
+
+      batch.push({
+        type: "PHASE_TRANSITIONED",
+        payload: {
+          phase: "NIGHT_ACTIVE",
+          nightCount: room.nightCount,
+          dayCount: room.dayCount,
+        },
+      });
     }
 
-    // Advance to Next Night
-    room.nightCount += 1;
-    room.phase = "NIGHT_ACTIVE";
-    room.votes = {};
-    room.nightActions = buildEngineNightActions(room.players, room.nightCount, false);
-
-    this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
-      phase: "NIGHT_ACTIVE",
-      nightCount: room.nightCount,
-      dayCount: room.dayCount,
-    });
-
+    await this.appendBatch(room, batch);
     return room;
   }
 
   /**
    * Handles client socket connection registration.
    */
-  public static registerClientSocket(
+  public static async registerClientSocket(
     socketId: string,
     socket: any,
     playerId: string,
     roomId: string
-  ): void {
+  ): Promise<void> {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
@@ -577,7 +696,7 @@ export class RoomManager {
     if (existingTimer) {
       clearTimeout(existingTimer);
       room.disconnectTimers.delete(playerId);
-      this.appendEvent(room, "PLAYER_RECONNECTED", playerId, { playerId });
+      await this.appendEvent(room, "PLAYER_RECONNECTED", playerId, { playerId });
     }
 
     room.clients.set(playerId, {
@@ -593,13 +712,13 @@ export class RoomManager {
   /**
    * Handles client socket disconnection with 60-second grace period.
    */
-  public static handleClientDisconnect(roomId: string, playerId: string): void {
+  public static async handleClientDisconnect(roomId: string, playerId: string): Promise<void> {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
     room.clients.delete(playerId);
 
-    this.appendEvent(room, "PLAYER_DISCONNECTED", playerId, { playerId });
+    await this.appendEvent(room, "PLAYER_DISCONNECTED", playerId, { playerId });
 
     // Set grace period timer
     const timer = setTimeout(() => {
