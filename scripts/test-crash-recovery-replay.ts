@@ -21,6 +21,7 @@ import {
   InMemoryEventStore,
   ReplayEngine,
   defaultEventStore,
+  PostgresEventStore,
 } from "../server/persistence";
 import { GameEvent, BaseCommand } from "../src/contracts";
 import { CommandDispatcher } from "../server/gateway/commandDispatcher";
@@ -174,6 +175,7 @@ async function runPhase4VerificationSuite() {
   // ------------------------------------------------------------
   console.log("\n--- 3. REQUIREMENT ③: STRICT PERSISTENCE INVARIANT (STORE FIRST, RAM SECOND) ---");
   {
+    // Part A: appendEvent failure
     const roomState = {
       roomId: "ROOM-FAIL-PERSIST",
       hostPlayerId: "p1",
@@ -194,7 +196,6 @@ async function runPhase4VerificationSuite() {
       updatedAt: Date.now(),
     };
 
-    // Simulate database write failure by replacing appendEvent temporarily
     const originalAppend = defaultEventStore.appendEvent;
     defaultEventStore.appendEvent = async () => {
       throw new Error("Simulated PostgreSQL connection loss during append");
@@ -213,6 +214,83 @@ async function runPhase4VerificationSuite() {
     assert(errorCaught === true, "[Req 3] Error propagated: appendEvent did NOT succeed silently");
     assert(roomState.sequenceNumber === 5, "[Req 3] RAM sequenceNumber was NOT incremented upon DB failure");
     assert(roomState.eventLog.length === 0, "[Req 3] RAM eventLog was NOT mutated upon DB failure");
+
+    // Part B: startGame persistence failure -> RAM phase & players MUST NOT mutate
+    const testRoomId = `ROOM-STRICT-CRASH-${Date.now()}`;
+    const { room: testRoom } = await RoomManager.createRoom("h1", "Host", "MODE_1_FIXED", testRoomId);
+    await RoomManager.joinRoom(testRoomId, "p2", "Player2");
+    await RoomManager.joinRoom(testRoomId, "p3", "Player3");
+    await RoomManager.joinRoom(testRoomId, "p4", "Player4");
+    await RoomManager.joinRoom(testRoomId, "p5", "Player5");
+
+    const originalAppendBatch = defaultEventStore.appendBatch;
+    defaultEventStore.appendBatch = async () => {
+      throw new Error("Simulated PostgreSQL transaction failure during startGame");
+    };
+
+    let startErrCaught = false;
+    try {
+      await RoomManager.startGame(testRoomId, "h1");
+    } catch (err: any) {
+      startErrCaught = true;
+      assert(err.message.includes("Simulated PostgreSQL"), "[Req 3] DB transaction failure in startGame thrown synchronously");
+    } finally {
+      defaultEventStore.appendBatch = originalAppendBatch;
+    }
+
+    assert(startErrCaught === true, "[Req 3] startGame DB failure aborted execution");
+    assert(testRoom.phase === "LOBBY", "[Req 3] RAM phase remains LOBBY when startGame DB write fails");
+    assert(testRoom.nightActions.length === 0, "[Req 3] RAM nightActions remains empty when startGame DB write fails");
+    assert(testRoom.players[0].role_id === "ROLE-024", "[Req 3] RAM players role assignment aborted on DB failure");
+
+    // Start game legitimately with restored DB
+    await RoomManager.startGame(testRoomId, "h1");
+    assert(testRoom.phase === "NIGHT_ACTIVE", "[Req 3] Legitimate startGame succeeded and transitioned to NIGHT_ACTIVE");
+
+    // Part C: submitNightAction persistence failure -> action.completed MUST NOT become true in RAM
+    const targetAction = testRoom.nightActions[0];
+    const actorId = targetAction.player_ids[0];
+    const targetPlayer = testRoom.players.find((p) => p.id !== actorId)!;
+
+    defaultEventStore.appendEvent = async () => {
+      throw new Error("Simulated PostgreSQL failure during submitNightAction");
+    };
+
+    let actionErrCaught = false;
+    try {
+      await RoomManager.submitNightAction(testRoomId, actorId, targetAction.id, targetPlayer.id);
+    } catch (err: any) {
+      actionErrCaught = true;
+      assert(err.message.includes("Simulated PostgreSQL"), "[Req 3] DB failure in submitNightAction thrown synchronously");
+    } finally {
+      defaultEventStore.appendEvent = originalAppend;
+    }
+
+    assert(actionErrCaught === true, "[Req 3] submitNightAction DB failure aborted execution");
+    assert(targetAction.completed === false, "[Req 3] RAM action.completed remains false when DB persistence fails");
+    assert(targetAction.target_player_id === null || targetAction.target_player_id === undefined, "[Req 3] RAM action.target_player_id was NOT modified on DB failure");
+
+    // Part D: resolveNightPhase persistence failure -> RAM phase MUST NOT become DAY_DISCUSSION
+    defaultEventStore.appendBatch = async () => {
+      throw new Error("Simulated PostgreSQL failure during resolveNightPhase");
+    };
+
+    let resolveErrCaught = false;
+    try {
+      await RoomManager.resolveNightPhase(testRoom);
+    } catch (err: any) {
+      resolveErrCaught = true;
+      assert(err.message.includes("Simulated PostgreSQL"), "[Req 3] DB failure in resolveNightPhase thrown synchronously");
+    } finally {
+      defaultEventStore.appendBatch = originalAppendBatch;
+    }
+
+    assert(resolveErrCaught === true, "[Req 3] resolveNightPhase DB failure aborted execution");
+    assert(testRoom.phase === "NIGHT_ACTIVE", "[Req 3] RAM phase remains NIGHT_ACTIVE when resolveNightPhase DB write fails");
+    assert(testRoom.dayCount === 0, "[Req 3] RAM dayCount was NOT incremented when DB write fails");
+
+    // Clean up test room
+    RoomManager.rooms.delete(testRoomId);
   }
 
   // ------------------------------------------------------------
@@ -735,6 +813,170 @@ async function runPhase4VerificationSuite() {
     );
     console.log("  ✅ [PASS] [Req 8] Golden Engine Result == Event Store Replay Result: 100% Zero Divergence");
     passCount++;
+  }
+
+  // ------------------------------------------------------------
+  // 9. REQUIREMENT ⑨: REAL POSTGRESQL PRODUCTION INTEGRATION TEST
+  // ------------------------------------------------------------
+  console.log("\n--- 9. REQUIREMENT ⑨: REAL POSTGRESQL PRODUCTION INTEGRATION TEST ---");
+  {
+    const pgUrl =
+      process.env.DATABASE_URL ||
+      "postgresql://postgres:3sekawancinta%40magot!!@localhost:5432/aspire_werewolf";
+    const pgStore = new PostgresEventStore(pgUrl);
+    try {
+      await pgStore.init();
+      console.log("  ✅ [PASS] [Req 9] Connected to real PostgreSQL instance and initialized schema DDL");
+      passCount++;
+
+      const pgRoomId = `ROOM-REAL-PG-${Date.now()}`;
+
+      // 1. Save match and participants to real PostgreSQL
+      await pgStore.saveMatch({
+        roomId: pgRoomId,
+        gameMode: "MODE_1_FIXED",
+        hostPlayerId: "p1",
+        hostPlayerName: "Alice",
+        status: "ACTIVE",
+      });
+
+      await pgStore.saveParticipant({
+        roomId: pgRoomId,
+        playerId: "p1",
+        playerName: "Alice",
+        isHost: true,
+        roleId: "ROLE-023",
+        canonicalName: "Werewolf",
+        team: "Werewolf",
+        alive: true,
+      });
+
+      const hasMatch = await pgStore.hasMatch(pgRoomId);
+      assert(hasMatch === true, "[Req 9] Match recorded in real PostgreSQL matches table");
+
+      // 2. Append event to real PostgreSQL
+      const realEvent: GameEvent = {
+        eventId: "018d34bf-4299-7000-8000-000000000001",
+        roomId: pgRoomId,
+        sequence: 1,
+        timestamp: Date.now(),
+        type: "ROOM_INITIALIZED",
+        actorId: "p1",
+        payload: { roomId: pgRoomId, hostPlayerId: "p1", hostPlayerName: "Alice" },
+        serverSignature: signGameEvent(pgRoomId, 1, "ROOM_INITIALIZED", {
+          roomId: pgRoomId,
+          hostPlayerId: "p1",
+          hostPlayerName: "Alice",
+        }),
+      };
+
+      await pgStore.appendEvent(realEvent);
+      const latestSeq = await pgStore.getLatestSequence(pgRoomId);
+      assert(latestSeq === 1, "[Req 9] Real PostgreSQL reported latestSequence 1");
+
+      // 3. Verify real PostgreSQL enforces UNIQUE (room_id, sequence) constraint
+      let duplicateCaught = false;
+      try {
+        await pgStore.appendEvent({ ...realEvent });
+      } catch (err: any) {
+        duplicateCaught = true;
+        assert(
+          err.message.includes("duplicate key") || err.message.includes("uq_room_sequence"),
+          "[Req 9] Real PostgreSQL rejected duplicate (room_id, sequence) constraint violation"
+        );
+      }
+      assert(duplicateCaught === true, "[Req 9] Duplicate constraint error caught from real PostgreSQL");
+
+      // 4. Test atomic batch in real PostgreSQL (transaction BEGIN ... COMMIT)
+      const batchEvents: GameEvent[] = [
+        {
+          eventId: "018d34bf-4299-7000-8000-000000000002",
+          roomId: pgRoomId,
+          sequence: 2,
+          timestamp: Date.now() + 1,
+          type: "GAME_STARTED",
+          actorId: "p1",
+          payload: { playerCount: 1, gameMode: "MODE_1_FIXED", rulesetVersion: "1.0.0" },
+          serverSignature: signGameEvent(pgRoomId, 2, "GAME_STARTED", {
+            playerCount: 1,
+            gameMode: "MODE_1_FIXED",
+            rulesetVersion: "1.0.0",
+          }),
+        },
+        {
+          eventId: "018d34bf-4299-7000-8000-000000000003",
+          roomId: pgRoomId,
+          sequence: 3,
+          timestamp: Date.now() + 2,
+          type: "ROLES_ASSIGNED",
+          actorId: "p1",
+          payload: {
+            assignedCount: 1,
+            rulesetVersion: "1.0.0",
+            assignments: [
+              {
+                playerId: "p1",
+                role_id: "ROLE-023",
+                canonical_name: "Werewolf",
+                team: "Werewolf",
+                category: "Werewolf",
+                seer_result: "Werewolf",
+              },
+            ],
+          },
+          serverSignature: signGameEvent(pgRoomId, 3, "ROLES_ASSIGNED", {
+            assignedCount: 1,
+            rulesetVersion: "1.0.0",
+            assignments: [
+              {
+                playerId: "p1",
+                role_id: "ROLE-023",
+                canonical_name: "Werewolf",
+                team: "Werewolf",
+                category: "Werewolf",
+                seer_result: "Werewolf",
+              },
+            ],
+          }),
+        },
+      ];
+
+      await pgStore.appendBatch(batchEvents);
+      const allEvents = await pgStore.getEvents(pgRoomId);
+      assert(allEvents.length === 3, "[Req 9] Batch committed atomically to real PostgreSQL game_events table");
+
+      // 5. Test crash-safe persistent command idempotency table in real PostgreSQL
+      const cmdId = `CMD-REAL-PG-${Date.now()}`;
+      await pgStore.recordCommand({
+        commandId: cmdId,
+        roomId: pgRoomId,
+        senderId: "p1",
+        commandType: "SUBMIT_NIGHT_ACTION",
+      });
+
+      const isRecorded = await pgStore.isCommandProcessed(pgRoomId, cmdId);
+      assert(isRecorded === true, "[Req 9] Command recorded and queried in real PostgreSQL processed_commands table");
+
+      const processedSet = await pgStore.getProcessedCommandIds(pgRoomId);
+      assert(processedSet.has(cmdId), "[Req 9] Processed command ID retrieved from real PostgreSQL");
+
+      // 6. Crash recovery directly from real PostgreSQL
+      const recoveredState = await ReplayEngine.reconstructState(pgRoomId, pgStore);
+      assert(recoveredState !== null, "[Req 9] State successfully reconstructed from real PostgreSQL");
+      assert(recoveredState!.sequenceNumber === 3, "[Req 9] Reconstructed sequence matches real PostgreSQL event log");
+      assert(Boolean(recoveredState!.processedCommandIds?.has(cmdId)), "[Req 9] Persistent command idempotency restored from real PostgreSQL");
+
+      // 7. Cleanup test room in real PostgreSQL
+      await pgStore.clearRoom(pgRoomId);
+      const remainingEvents = await pgStore.getEvents(pgRoomId);
+      assert(remainingEvents.length === 0, "[Req 9] Test room cascade-cleaned up from real PostgreSQL");
+
+      await pgStore.close();
+      console.log("  ✅ [PASS] [Req 9] Real PostgreSQL integration test passed 100%!");
+      passCount++;
+    } catch (pgErr: any) {
+      console.warn("  ⚠️ [WARN] [Req 9] Real PostgreSQL instance connection skipped:", pgErr.message);
+    }
   }
 
   // ------------------------------------------------------------

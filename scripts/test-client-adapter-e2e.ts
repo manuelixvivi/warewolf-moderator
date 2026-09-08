@@ -305,7 +305,7 @@ async function runE2ETest() {
   console.log("\n--- 6. DAYTIME VOTING & AUTHORITATIVE LYNCH ---");
   {
     // A. Advance to voting
-    RoomManager.startDayVoting(roomId);
+    await RoomManager.startDayVoting(roomId);
     FogOfWarDispatcher.dispatchRoomSync(RoomManager.getRoom(roomId)!);
 
     await new Promise((r) => setTimeout(r, 100));

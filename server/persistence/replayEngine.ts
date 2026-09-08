@@ -126,7 +126,7 @@ export class ReplayEngine {
       case "ROLES_ASSIGNED": {
         if (!state) throw new Error("Cannot apply ROLES_ASSIGNED on uninitialized state.");
         const roleAssignments = event.payload?.assignments as
-          | Array<{ playerId: string; role_id: string }>
+          | Array<any>
           | undefined;
 
         let players = state.players;
@@ -134,6 +134,34 @@ export class ReplayEngine {
           players = state.players.map((p) => {
             const assignment = roleAssignments.find((a) => a.playerId === p.id);
             if (!assignment) return p;
+
+            // If assignment contains full canonical snapshot, project directly without external dependency
+            if (assignment.canonical_name && assignment.team) {
+              return {
+                ...p,
+                role_id: assignment.role_id,
+                canonical_name: assignment.canonical_name,
+                team: assignment.team,
+                originalTeam: assignment.originalTeam || assignment.team,
+                category: assignment.category || "Village",
+                seer_result: assignment.seer_result || "Villager",
+                role_points: assignment.role_points ?? 1,
+                balance_weight: assignment.balance_weight ?? 1,
+                night_priority: assignment.night_priority ?? 50,
+                active_phase: assignment.active_phase || "Night",
+                action_type: assignment.action_type || "None",
+                trigger: assignment.trigger || "None",
+                target_type: assignment.target_type || "None",
+                usage_limit: assignment.usage_limit,
+                can_change_role: assignment.can_change_role,
+                reveal_on_death: assignment.reveal_on_death,
+                requires_engine_resolution: assignment.requires_engine_resolution,
+                description_id: assignment.description_id || assignment.tooltip_id,
+                tooltip_id: assignment.tooltip_id,
+              };
+            }
+
+            // Fallback for legacy events
             const role = ROLE_BY_ID.get(assignment.role_id) || ALL_ROLES[0];
             return {
               ...p,
@@ -218,13 +246,85 @@ export class ReplayEngine {
       case "NIGHT_RESOLVED": {
         if (!state) throw new Error("Cannot apply NIGHT_RESOLVED on uninitialized state.");
         const payload = event.payload;
-        const killedPlayerIds = new Set<string>(payload.killedPlayerIds || []);
-        if (payload.cascadeCasualties) {
-          for (const id of payload.cascadeCasualties) killedPlayerIds.add(id);
+
+        // If full canonical player snapshot is present in event payload, project directly!
+        let players: PlayerEngineState[];
+        if (payload.updatedPlayers && Array.isArray(payload.updatedPlayers)) {
+          players = payload.updatedPlayers.map((p: any) => ({ ...p }));
+        } else {
+          // Comprehensive fallback reduction for legacy events
+          const killedPlayerIds = new Set<string>(payload.killedPlayerIds || []);
+          if (payload.cascadeCasualties) {
+            for (const id of payload.cascadeCasualties) killedPlayerIds.add(id);
+          }
+          const silencedIds = new Set<string>(payload.silencedPlayerIds || []);
+          const convertedIds = new Set<string>(payload.convertedPlayerIds || []);
+
+          players = state.players.map((p) => {
+            let updated = { ...p, protected: false };
+            if (killedPlayerIds.has(p.id)) {
+              updated.alive = false;
+            }
+            if (silencedIds.has(p.id)) {
+              updated.silenced = true;
+            }
+            if (convertedIds.has(p.id)) {
+              updated.inCult = true;
+            }
+            return updated;
+          });
         }
 
+        return {
+          ...state,
+          players,
+          nightActions: [],
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "ROLE_TRANSFORMED": {
+        if (!state) throw new Error("Cannot apply ROLE_TRANSFORMED on uninitialized state.");
+        const payload = event.payload;
         const players = state.players.map((p) => {
-          if (killedPlayerIds.has(p.id)) {
+          if (p.id === payload.playerId) {
+            const role = payload.toRoleId ? ROLE_BY_ID.get(payload.toRoleId) : undefined;
+            return {
+              ...p,
+              role_id: payload.toRoleId || p.role_id,
+              canonical_name: payload.canonicalName || role?.canonical_name || p.canonical_name,
+              team: payload.toTeam || role?.team || p.team,
+              category: role?.category || p.category,
+              seer_result: role?.seer_result || p.seer_result,
+            };
+          }
+          return p;
+        });
+
+        return {
+          ...state,
+          players,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "DEATH_CASCADE_TRIGGERED": {
+        if (!state) throw new Error("Cannot apply DEATH_CASCADE_TRIGGERED on uninitialized state.");
+        const payload = event.payload;
+        const victimIds = new Set<string>(
+          Array.isArray(payload.eliminatedPlayerIds)
+            ? payload.eliminatedPlayerIds
+            : payload.eliminatedPlayerId
+            ? [payload.eliminatedPlayerId]
+            : []
+        );
+
+        const players = state.players.map((p) => {
+          if (victimIds.has(p.id)) {
             return { ...p, alive: false };
           }
           return p;
@@ -233,7 +333,6 @@ export class ReplayEngine {
         return {
           ...state,
           players,
-          nightActions: [],
           sequenceNumber: event.sequence,
           eventLog: [...state.eventLog, event],
           updatedAt: event.timestamp,
@@ -256,13 +355,19 @@ export class ReplayEngine {
       case "VOTE_RESOLVED": {
         if (!state) throw new Error("Cannot apply VOTE_RESOLVED on uninitialized state.");
         const payload = event.payload;
-        const elimId = payload.eliminatedPlayerId;
-        const players = state.players.map((p) => {
-          if (p.id === elimId) {
-            return { ...p, alive: false };
-          }
-          return p;
-        });
+
+        let players: PlayerEngineState[];
+        if (payload.updatedPlayers && Array.isArray(payload.updatedPlayers)) {
+          players = payload.updatedPlayers.map((p: any) => ({ ...p }));
+        } else {
+          const elimId = payload.eliminatedPlayerId;
+          players = state.players.map((p) => {
+            if (p.id === elimId) {
+              return { ...p, alive: false };
+            }
+            return p;
+          });
+        }
 
         return {
           ...state,

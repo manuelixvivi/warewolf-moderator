@@ -5,7 +5,7 @@
 //  PostgreSQL = Canonical Historical Truth. State = Projection(Event[1..N])."
 // ============================================================
 
-import { v4 as uuidv4 } from "uuid";
+import { v7 as uuidv7 } from "uuid";
 import {
   AuthoritativeRoomState,
   ConnectedClient,
@@ -72,7 +72,7 @@ export class RoomManager {
     const signature = signGameEvent(room.roomId, candidateSequence, type, payload);
 
     const event: GameEvent<T> = {
-      eventId: uuidv4(),
+      eventId: uuidv7(),
       roomId: room.roomId,
       sequence: candidateSequence,
       timestamp: Date.now(),
@@ -108,7 +108,7 @@ export class RoomManager {
     const preparedEvents: GameEvent[] = eventsToCommit.map((item) => {
       currentSeq++;
       return {
-        eventId: uuidv4(),
+        eventId: uuidv7(),
         roomId: room.roomId,
         sequence: currentSeq,
         timestamp: Date.now(),
@@ -168,28 +168,7 @@ export class RoomManager {
       hasUsedAbility: false,
     };
 
-    const room: AuthoritativeRoomState = {
-      roomId,
-      hostPlayerId,
-      gameMode,
-      phase: "LOBBY",
-      dayCount: 0,
-      nightCount: 0,
-      sequenceNumber: 0,
-      timeoutCount: 0,
-      players: [hostPlayer],
-      votes: {},
-      nightActions: [],
-      eventLog: [],
-      clients: new Map(),
-      disconnectTimers: new Map(),
-      processedCommandIds: new Set(),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    this.rooms.set(roomId, room);
-
+    // 1. Persist to database FIRST
     await defaultEventStore.saveMatch({
       roomId,
       gameMode,
@@ -211,12 +190,48 @@ export class RoomManager {
       });
     }
 
-    await this.appendEvent(room, "ROOM_INITIALIZED", hostPlayerId, {
+    const initEventPayload = {
       roomId,
       gameMode,
       hostPlayerId,
       hostPlayerName,
-    });
+    };
+    const initEventSignature = signGameEvent(roomId, 1, "ROOM_INITIALIZED", initEventPayload);
+    const initEvent: GameEvent = {
+      eventId: uuidv7(),
+      roomId,
+      sequence: 1,
+      timestamp: Date.now(),
+      type: "ROOM_INITIALIZED",
+      actorId: hostPlayerId,
+      payload: initEventPayload,
+      serverSignature: initEventSignature,
+    };
+
+    await defaultEventStore.appendEvent(initEvent);
+
+    // 2. ONLY upon successful database persistence commit, register in-memory room
+    const room: AuthoritativeRoomState = {
+      roomId,
+      hostPlayerId,
+      gameMode,
+      phase: "LOBBY",
+      dayCount: 0,
+      nightCount: 0,
+      sequenceNumber: 1,
+      timeoutCount: 0,
+      players: [hostPlayer],
+      votes: {},
+      nightActions: [],
+      eventLog: [initEvent],
+      clients: new Map(),
+      disconnectTimers: new Map(),
+      processedCommandIds: new Set(),
+      createdAt: initEvent.timestamp,
+      updatedAt: initEvent.timestamp,
+    };
+
+    this.rooms.set(roomId, room);
 
     const sessionToken = SessionManager.createSessionToken(
       hostPlayerId,
@@ -247,7 +262,7 @@ export class RoomManager {
 
     let existingPlayer = room.players.find((p) => p.id === playerId);
     if (!existingPlayer) {
-      existingPlayer = {
+      const candidatePlayer: PlayerEngineState = {
         id: playerId,
         name: playerName,
         isHost: false,
@@ -271,7 +286,6 @@ export class RoomManager {
         inCult: false,
         hasUsedAbility: false,
       };
-      room.players.push(existingPlayer);
 
       if (defaultEventStore.saveParticipant) {
         await defaultEventStore.saveParticipant({
@@ -279,17 +293,22 @@ export class RoomManager {
           playerId,
           playerName,
           isHost: false,
-          roleId: existingPlayer.role_id,
-          canonicalName: existingPlayer.canonical_name,
-          team: existingPlayer.team,
+          roleId: candidatePlayer.role_id,
+          canonicalName: candidatePlayer.canonical_name,
+          team: candidatePlayer.team,
           alive: true,
         });
       }
 
+      // Await database persistence BEFORE mutating room.players array in RAM
       await this.appendEvent(room, "PLAYER_JOINED", playerId, {
         playerId,
         playerName,
       });
+
+      // Commit candidate player to RAM only after database confirms event persistence
+      existingPlayer = candidatePlayer;
+      room.players.push(existingPlayer);
     }
 
     const sessionToken = SessionManager.createSessionToken(
@@ -368,43 +387,45 @@ export class RoomManager {
       assignedRoleDefs = generateBalancedRandomComposition(playerCount);
     }
 
-    // Mutate internal player entities with assigned roles
-    room.players.forEach((p, idx) => {
+    // PURE CANDIDATE COMPUTATION: Zero RAM mutation before persistence commit!
+    const candidatePlayers: PlayerEngineState[] = room.players.map((p, idx) => {
       const role = assignedRoleDefs[idx] || ALL_ROLES[0];
-      p.role_id = role.role_id;
-      p.canonical_name = role.canonical_name;
-      p.team = role.team;
-      p.originalTeam = role.team;
-      p.category = role.category;
-      p.seer_result = role.seer_result;
-      p.role_points = role.role_points;
-      p.balance_weight = role.balance_weight;
-      p.night_priority = role.night_priority || 50;
-      p.active_phase = role.active_phase;
-      p.action_type = role.action_type;
-      p.trigger = role.trigger;
-      p.target_type = role.target_type;
-      p.usage_limit = role.usage_limit;
-      p.can_change_role = role.can_change_role;
-      p.reveal_on_death = role.reveal_on_death;
-      p.requires_engine_resolution = role.requires_engine_resolution;
-      p.description_id = role.description_id || role.tooltip_id;
-      p.tooltip_id = role.tooltip_id;
-      p.alive = true;
-      p.protected = false;
-      p.silenced = false;
-      p.inCult = false;
-      p.hasUsedAbility = false;
+      return {
+        ...p,
+        role_id: role.role_id,
+        canonical_name: role.canonical_name,
+        team: role.team,
+        originalTeam: role.team,
+        category: role.category,
+        seer_result: role.seer_result,
+        role_points: role.role_points,
+        balance_weight: role.balance_weight,
+        night_priority: role.night_priority || 50,
+        active_phase: role.active_phase,
+        action_type: role.action_type,
+        trigger: role.trigger,
+        target_type: role.target_type,
+        usage_limit: role.usage_limit,
+        can_change_role: role.can_change_role,
+        reveal_on_death: role.reveal_on_death,
+        requires_engine_resolution: role.requires_engine_resolution,
+        description_id: role.description_id || role.tooltip_id,
+        tooltip_id: role.tooltip_id,
+        alive: true,
+        protected: false,
+        silenced: false,
+        inCult: false,
+        hasUsedAbility: false,
+      };
     });
 
-    room.nightCount = 1;
-    room.dayCount = 0;
-    room.phase = "NIGHT_ACTIVE";
-
-    // Build night actions for Night 1
-    room.nightActions = buildEngineNightActions(room.players, room.nightCount, false);
+    const candidateNightCount = 1;
+    const candidateDayCount = 0;
+    const candidatePhase: AuthoritativeRoomState["phase"] = "NIGHT_ACTIVE";
+    const candidateNightActions = buildEngineNightActions(candidatePlayers, candidateNightCount, false);
 
     // ATOMIC PERSISTENCE: Commit GAME_STARTED, ROLES_ASSIGNED, and PHASE_TRANSITIONED together
+    // Includes complete canonical role snapshot & ruleset version for immutable long-term replay
     await this.appendBatch(room, [
       {
         type: "GAME_STARTED",
@@ -412,6 +433,8 @@ export class RoomManager {
         payload: {
           playerCount,
           gameMode: room.gameMode,
+          rulesetVersion: "1.0.0",
+          engineVersion: "1.0.0",
         },
       },
       {
@@ -419,24 +442,54 @@ export class RoomManager {
         actorId: hostPlayerId,
         payload: {
           assignedCount: playerCount,
-          assignments: room.players.map((p) => ({ playerId: p.id, role_id: p.role_id })),
+          rulesetVersion: "1.0.0",
+          assignments: candidatePlayers.map((p) => ({
+            playerId: p.id,
+            role_id: p.role_id,
+            canonical_name: p.canonical_name,
+            team: p.team,
+            originalTeam: p.originalTeam,
+            category: p.category,
+            seer_result: p.seer_result,
+            role_points: p.role_points,
+            balance_weight: p.balance_weight,
+            night_priority: p.night_priority,
+            active_phase: p.active_phase,
+            action_type: p.action_type,
+            trigger: p.trigger,
+            target_type: p.target_type,
+            usage_limit: p.usage_limit,
+            can_change_role: p.can_change_role,
+            reveal_on_death: p.reveal_on_death,
+            requires_engine_resolution: p.requires_engine_resolution,
+            description_id: p.description_id,
+            tooltip_id: p.tooltip_id,
+          })),
         },
       },
       {
         type: "PHASE_TRANSITIONED",
         payload: {
-          phase: "NIGHT_ACTIVE",
-          nightCount: room.nightCount,
-          dayCount: room.dayCount,
+          phase: candidatePhase,
+          nightCount: candidateNightCount,
+          dayCount: candidateDayCount,
         },
       },
     ]);
+
+    // ONLY UPON SUCCESSFUL DATABASE BATCH COMMIT: Apply candidate state to RAM!
+    room.players = candidatePlayers;
+    room.nightCount = candidateNightCount;
+    room.dayCount = candidateDayCount;
+    room.phase = candidatePhase;
+    room.nightActions = candidateNightActions;
 
     return room;
   }
 
   /**
    * Submits a night action. If all completed, automatically resolves night!
+   * Enforces Database-First persistence: event is committed before action is marked completed in RAM.
    */
   public static async submitNightAction(
     roomId: string,
@@ -459,14 +512,17 @@ export class RoomManager {
       throw new Error(`Action ${actionId} not found or actor ${actorPlayerId} unauthorized.`);
     }
 
-    action.target_player_id = targetPlayerId;
-    action.secondary_target_id = secondaryTargetId || null;
-    action.completed = true;
-
+    // 1. AWAIT database persistence commit BEFORE mutating action in RAM
     await this.appendEvent(room, "NIGHT_ACTION_SUBMITTED", actorPlayerId, {
       actionId,
       targetPlayerId,
+      secondaryTargetId: secondaryTargetId || null,
     });
+
+    // 2. Commit to RAM only after database persistence confirms success
+    action.target_player_id = targetPlayerId;
+    action.secondary_target_id = secondaryTargetId || null;
+    action.completed = true;
 
     // Check if all actions completed
     const allCompleted = room.nightActions.every((a) => a.completed);
@@ -480,11 +536,11 @@ export class RoomManager {
 
   /**
    * Resolves the night phase using the Golden Engine modules.
-   * Commits results in an atomic database transaction.
+   * STRICT PERSISTENCE INVARIANT:
+   * Commits results in an atomic database transaction BEFORE mutating RAM room state.
    */
   public static async resolveNightPhase(room: AuthoritativeRoomState): Promise<AuthoritativeRoomState> {
-    room.phase = "NIGHT_RESOLVING";
-
+    // Pure calculation via Golden Engine: ZERO RAM mutation yet!
     const { updatedPlayers, outcome } = resolveNightActions(
       room.players,
       room.nightActions,
@@ -498,46 +554,74 @@ export class RoomManager {
       "WEREWOLF"
     );
 
-    room.players = deathChain.updatedPlayers;
-
-    // Advance to Day Phase
-    room.dayCount += 1;
-    room.votes = {};
-    room.nightActions = [];
+    const candidatePlayers = deathChain.updatedPlayers;
+    const candidateDayCount = room.dayCount + 1;
+    const candidateNightCount = room.nightCount;
 
     // Check Win Conditions
-    const winResult = evaluateWinConditions(room.players, { timeoutCount: room.timeoutCount });
+    const winResult = evaluateWinConditions(candidatePlayers, { timeoutCount: room.timeoutCount });
+    const candidatePhase: AuthoritativeRoomState["phase"] = winResult.gameEnded ? "GAME_OVER" : "DAY_DISCUSSION";
 
-    const batch: Array<{ type: GameEventType; payload: any }> = [
+    const batch: Array<{ type: GameEventType; payload: any; actorId?: string }> = [
       {
         type: "NIGHT_RESOLVED",
         payload: {
           killedPlayerIds: outcome.killedPlayerIds,
           savedPlayerIds: outcome.savedPlayerIds,
           cascadeCasualties: deathChain.chainCasualties || [],
+          silencedPlayerIds: outcome.silencedPlayerIds || [],
+          convertedPlayerIds: outcome.convertedPlayerIds || [],
+          triggeredActions: outcome.triggeredActions || [],
+          updatedPlayers: candidatePlayers.map((p) => ({ ...p })), // Canonical snapshot of all player states
         },
       },
     ];
 
+    // Detect and emit explicit ROLE_TRANSFORMED events if roles or teams mutated
+    for (const p of candidatePlayers) {
+      const old = room.players.find((x) => x.id === p.id);
+      if (old && (old.role_id !== p.role_id || old.team !== p.team)) {
+        batch.push({
+          type: "ROLE_TRANSFORMED",
+          actorId: p.id,
+          payload: {
+            playerId: p.id,
+            fromRoleId: old.role_id,
+            toRoleId: p.role_id,
+            fromTeam: old.team,
+            toTeam: p.team,
+            canonicalName: p.canonical_name,
+          },
+        });
+      }
+    }
+
     if (winResult.gameEnded) {
-      room.phase = "GAME_OVER";
       batch.push({
         type: "WIN_CONDITION_SATISFIED",
         payload: winResult,
       });
     } else {
-      room.phase = "DAY_DISCUSSION";
       batch.push({
         type: "PHASE_TRANSITIONED",
         payload: {
-          phase: "DAY_DISCUSSION",
-          dayCount: room.dayCount,
-          nightCount: room.nightCount,
+          phase: candidatePhase,
+          dayCount: candidateDayCount,
+          nightCount: candidateNightCount,
         },
       });
     }
 
+    // 1. PERSIST ATOMIC BATCH TO DB FIRST
     await this.appendBatch(room, batch);
+
+    // 2. ONLY UPON SUCCESSFUL DB COMMIT: Apply candidate state to RAM!
+    room.players = candidatePlayers;
+    room.dayCount = candidateDayCount;
+    room.phase = candidatePhase;
+    room.votes = {};
+    room.nightActions = [];
+
     return room;
   }
 
@@ -551,20 +635,23 @@ export class RoomManager {
       throw new Error(`Cannot start voting from phase ${room.phase}.`);
     }
 
-    room.phase = "DAY_VOTING";
-    room.votes = {};
-
+    // 1. PERSIST TO DB FIRST
     await this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
       phase: "DAY_VOTING",
       dayCount: room.dayCount,
       nightCount: room.nightCount,
     });
 
+    // 2. ONLY AFTER DB COMMIT: Apply to RAM
+    room.phase = "DAY_VOTING";
+    room.votes = {};
+
     return room;
   }
 
   /**
    * Submits a vote during DAY_VOTING.
+   * Enforces Database-First persistence: event is committed before vote is registered in RAM.
    */
   public static async submitVote(
     roomId: string,
@@ -582,12 +669,14 @@ export class RoomManager {
       throw new Error(`Voter ${voterId} is dead or does not exist.`);
     }
 
-    room.votes[voterId] = targetPlayerId;
-
+    // 1. AWAIT database persistence commit BEFORE updating votes in RAM
     await this.appendEvent(room, "VOTE_CAST", voterId, {
       voterId,
       targetPlayerId,
     });
+
+    // 2. Commit vote to RAM only after database confirms persistence
+    room.votes[voterId] = targetPlayerId;
 
     // Count eligible living voters (excluding silenced)
     const eligibleVoters = room.players.filter((p) => p.alive && !p.silenced);
@@ -603,21 +692,20 @@ export class RoomManager {
 
   /**
    * Resolves Day Votes using the Golden Engine modules.
-   * Commits results in an atomic database transaction.
+   * STRICT PERSISTENCE INVARIANT:
+   * Commits results in an atomic database transaction BEFORE mutating RAM room state.
    */
   public static async resolveDayVotePhase(
     room: AuthoritativeRoomState,
     isTimeout: boolean = false
   ): Promise<AuthoritativeRoomState> {
-    room.phase = "DAY_RESOLVING";
-
+    const candidateTimeoutCount = isTimeout ? room.timeoutCount + 1 : room.timeoutCount;
     const batch: Array<{ type: GameEventType; payload: any }> = [];
 
     if (isTimeout) {
-      room.timeoutCount += 1;
       batch.push({
         type: "TIMEOUT_OCCURRED",
-        payload: { timeoutCount: room.timeoutCount },
+        payload: { timeoutCount: candidateTimeoutCount },
       });
     }
 
@@ -637,7 +725,7 @@ export class RoomManager {
       finalPlayers = deathChain.updatedPlayers;
     }
 
-    room.players = finalPlayers;
+    const winResult = evaluateWinConditions(finalPlayers, { timeoutCount: candidateTimeoutCount });
 
     batch.push({
       type: "VOTE_RESOLVED",
@@ -647,35 +735,45 @@ export class RoomManager {
         princeSurvived: outcome.princeSurvived,
         tannerWon: outcome.tannerWon,
         dayTimerReduced: outcome.dayTimerReduced,
+        updatedPlayers: finalPlayers.map((p) => ({ ...p })), // Canonical snapshot of all player states
       },
     });
 
-    // Check Win Conditions
-    const winResult = evaluateWinConditions(room.players, { timeoutCount: room.timeoutCount });
+    let candidatePhase: AuthoritativeRoomState["phase"];
+    let candidateNightCount = room.nightCount;
+    let candidateNightActions: EngineNightAction[] = [];
+
     if (winResult.gameEnded) {
-      room.phase = "GAME_OVER";
+      candidatePhase = "GAME_OVER";
       batch.push({
         type: "WIN_CONDITION_SATISFIED",
         payload: winResult,
       });
     } else {
-      // Advance to Next Night
-      room.nightCount += 1;
-      room.phase = "NIGHT_ACTIVE";
-      room.votes = {};
-      room.nightActions = buildEngineNightActions(room.players, room.nightCount, false);
-
+      candidatePhase = "NIGHT_ACTIVE";
+      candidateNightCount = room.nightCount + 1;
+      candidateNightActions = buildEngineNightActions(finalPlayers, candidateNightCount, false);
       batch.push({
         type: "PHASE_TRANSITIONED",
         payload: {
           phase: "NIGHT_ACTIVE",
-          nightCount: room.nightCount,
+          nightCount: candidateNightCount,
           dayCount: room.dayCount,
         },
       });
     }
 
+    // 1. PERSIST ATOMIC BATCH TO DB FIRST
     await this.appendBatch(room, batch);
+
+    // 2. ONLY UPON SUCCESSFUL DB COMMIT: Apply candidate state to RAM!
+    room.timeoutCount = candidateTimeoutCount;
+    room.players = finalPlayers;
+    room.phase = candidatePhase;
+    room.nightCount = candidateNightCount;
+    room.nightActions = candidateNightActions;
+    room.votes = {};
+
     return room;
   }
 

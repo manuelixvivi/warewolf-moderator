@@ -27,10 +27,26 @@ export const config: ServerConfig = {
 };
 
 /**
+ * Deterministic JSON serializer that sorts object keys lexicographically.
+ * Ensures HMAC signatures remain identical regardless of PostgreSQL JSONB key reordering.
+ */
+export function canonicalJsonStringify(obj: any): string {
+  if (obj === null || typeof obj !== "object") {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return `[${obj.map(canonicalJsonStringify).join(",")}]`;
+  }
+  const keys = Object.keys(obj).sort();
+  const pairs = keys.map((k) => `${JSON.stringify(k)}:${canonicalJsonStringify(obj[k])}`);
+  return `{${pairs.join(",")}}`;
+}
+
+/**
  * Creates an HMAC-SHA256 signature for server-signed GameEvents.
  */
 export function signGameEvent(roomId: string, sequence: number, type: string, payload: any): string {
-  const data = `${roomId}:${sequence}:${type}:${JSON.stringify(payload)}`;
+  const data = `${roomId}:${sequence}:${type}:${canonicalJsonStringify(payload)}`;
   return crypto.createHmac("sha256", config.hmacSecret).update(data).digest("hex");
 }
 
