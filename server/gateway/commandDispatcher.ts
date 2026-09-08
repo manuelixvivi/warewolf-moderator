@@ -103,7 +103,19 @@ export class CommandDispatcher {
       };
     }
 
-    // Tier 4: Phase & Status Validation for In-Game Commands
+    // Tier 4: Idempotency Check (Duplicate command retransmission deduplication)
+    if (room.processedCommandIds && room.processedCommandIds.has(command.commandId)) {
+      return {
+        isValid: false,
+        error: `Duplicate command: commandId ${command.commandId} has already been processed.`,
+        errorCode: "DUPLICATE_COMMAND",
+        isDuplicate: true,
+        command,
+        player,
+      };
+    }
+
+    // Tier 5: Phase & Status Validation for In-Game Commands
     if (command.type === "SUBMIT_NIGHT_ACTION") {
       if (room.phase !== "NIGHT_ACTIVE") {
         return {
@@ -155,20 +167,31 @@ export class CommandDispatcher {
   /**
    * Executes a validated command and dispatches state updates.
    */
-  public static handleCommand(rawMessage: string): { success: boolean; error?: string } {
+  public static handleCommand(rawMessage: string): {
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    isDuplicate?: boolean;
+  } {
     let rawParsed: any;
     try {
       rawParsed = JSON.parse(rawMessage);
     } catch {
-      return { success: false, error: "Invalid JSON" };
+      return { success: false, error: "Invalid JSON", errorCode: "INVALID_SCHEMA" };
     }
 
     const roomId = rawParsed?.roomId;
     const room = roomId ? RoomManager.getRoom(roomId) : undefined;
 
     const validation = this.validateCommand(rawMessage, room);
+    if (validation.isDuplicate) {
+      // Idempotency guarantee: command was already successfully processed.
+      // Acknowledge without re-executing state mutation or emitting duplicate events.
+      return { success: true, isDuplicate: true };
+    }
+
     if (!validation.isValid || !validation.command || !room) {
-      return { success: false, error: validation.error };
+      return { success: false, error: validation.error, errorCode: validation.errorCode };
     }
 
     const { command } = validation;
@@ -208,8 +231,14 @@ export class CommandDispatcher {
         }
 
         default:
-          return { success: false, error: `Unsupported command type: ${command.type}` };
+          return { success: false, error: `Unsupported command type: ${command.type}`, errorCode: "INVALID_SCHEMA" };
       }
+
+      // Idempotency: Register commandId as successfully processed
+      if (!room.processedCommandIds) {
+        room.processedCommandIds = new Set<string>();
+      }
+      room.processedCommandIds.add(command.commandId);
 
       // After state mutation, dispatch synchronized Fog-of-War updates
       FogOfWarDispatcher.dispatchRoomSync(room);

@@ -332,55 +332,65 @@ The game engine **NEVER** `await`s the LLM. If the AI worker times out (3000ms t
 
 ---
 
-## 7. Migration & Engineering Roadmap (SOURCE 7 to v1.0)
+## 7. Canonical 8-Phase Production Migration Roadmap
 
-To prevent breaking the mature, verified engine baseline, migration proceeds in 8 sequential phases:
+To prevent breaking the mature, verified Golden Engine baseline, migration strictly proceeds through 8 sequential phases:
 
 ```mermaid
 gantt
     title ASPIRE Production Migration Roadmap (Phase 0 to Phase 8)
     dateFormat  YYYY-MM-DD
     section Phase 0: Baseline Freeze
-    Lock SOURCE(7) Golden Baseline        :done, 2026-09-08, 1d
+    Lock Golden Engine Baseline & 75 Roles        :done, 2026-09-08, 1d
     section Phase 1: Contract Lock
-    Formalize 12 Canonical Contracts      :active, 2026-09-09, 2d
-    section Phase 2: Authoritative Server
-    Fastify WSS Gateway & Session Auth    :2026-09-11, 4d
-    section Phase 3: Move Engine Core
-    Port Deterministic Resolvers to Server:2026-09-15, 3d
-    section Phase 4: Event Persistence
-    PostgreSQL Event Store & Replay       :2026-09-18, 3d
-    section Phase 5: Ephemeral Cache
-    Redis Rooms, Sessions & Presence      :2026-09-21, 3d
-    section Phase 6: Stateful Reconnection
-    Monotonic Sequence & Delta Replay     :2026-09-24, 3d
-    section Phase 7: AI Worker Queue
-    BullMQ Async Worker & Fallback        :2026-09-27, 3d
+    Formalize 12 Canonical Contracts              :done, 2026-09-08, 1d
+    section Phase 2: Authoritative Gateway
+    Fastify WSS Gateway, Auth & Pipeline          :done, 2026-09-08, 1d
+    section Phase 3: Client WSS Adapter
+    Client WebSocket Adapter & Optimistic UI      :done, 2026-09-08, 1d
+    section Phase 4: PostgreSQL Event Store
+    Append-Only Event Store & Crash Replay        :active, 2026-09-08, 1d
+    section Phase 5: Redis Cache & Locks
+    Redis Ephemeral Presence & Distributed Locks  :2026-09-09, 1d
+    section Phase 6: Session Reconnection
+    Monotonic Sequence Catchup & Grace Window     :2026-09-10, 1d
+    section Phase 7: Decoupled AI Narrative
+    BullMQ Async Lore Worker & Instant Fallback   :2026-09-11, 1d
     section Phase 8: Production Hardening
-    Docker, Load Testing & Monitoring     :2026-09-30, 4d
+    Docker, 100-Room Load Testing & CI/CD         :2026-09-12, 1d
 ```
 
-### Phase Breakdown:
-1. **Phase 0 — Baseline Freeze (SOURCE 7)**: Lock engine behavior as the Golden Reference. Zero engine modifications while building server infrastructure.
-2. **Phase 1 — Contract Lock**: Formalize the 12 Canonical Contracts (`src/contracts/index.ts`) defining GameState, Commands, Events, Roles, Actions, Death, Vote, Win, Transformation, Fog-of-War, Reconnect, and Narrative.
-3. **Phase 2 — Authoritative Server Core**: Stand up Fastify + WebSocket (WSS) gateway with JWT session authentication to eliminate client-side impersonation.
-4. **Phase 3 — Move Engine Modules**: Migrate existing deterministic modules (`abilityRegistry`, `actionResolver`, `deathResolver`, `voteResolver`, `winEngine`, `roleTransformation`) onto the server with zero regression.
-5. **Phase 4 — Persistence (Event Store)**: Configure PostgreSQL append-only event table for immutable historical match logs and replayability.
-6. **Phase 5 — Redis Ephemeral Layer**: Deploy Redis for high-speed active room state, presence tracking, heartbeat TTLs, and distributed locking.
-7. **Phase 6 — Stateful Reconnection**: Implement sequence-number-based event replay so clients reconnect seamlessly after network disconnects.
-8. **Phase 7 — Asynchronous AI Narrative**: Deploy BullMQ worker with 3-second timeout and instant procedural fallback templates.
-9. **Phase 8 — Production Hardening**: Containerization with Docker, CI/CD pipelines, rate limiting, and 100-room concurrency testing.
+### Canonical Phase Breakdown:
+1. **Phase 0 — Baseline Freeze (Golden Reference)**: 🟢 **DONE**
+   - 75 roles, 79 abilities, Mode 2 sampling without replacement (`balanceEngine.ts`), cascading death chains, and Father Time timeout pipeline frozen. Zero engine rewrites.
+2. **Phase 1 — Canonical Contract Lock**: 🟢 **DONE**
+   - Formalized 12 Canonical Contracts (`src/contracts/index.ts`) defining GameState, Commands, Events, Roles, Actions, Death, Vote, Win, Transformation, Fog-of-War, Reconnect, and Narrative. Automated verification via `scripts/test-contracts-validation.ts`.
+3. **Phase 2 — Authoritative Server Gateway**: 🟢 **DONE**
+   - Standalone Fastify + WebSocket (WSS) gateway with HS256 JWT session issuance, multi-tier command pipeline (Schema -> JWT Auth -> Sender/Room Authorization -> Phase Invariant -> Engine delegation), and Fog-of-War partitioned dispatch.
+4. **Phase 3 — Client WebSocket Adapter**: 🟢 **DONE**
+   - Client transport adapter enforcing *"optimistic interaction, authoritative state"*, auto-reconnect backoff, and monotonic sequence tracking. Legacy prototype marked `@deprecated` behind feature flag `useAuthoritativeWss: true`.
+5. **Phase 4 — PostgreSQL Event Store & Deterministic Replay**: 🟢 **DONE & HARDENED**
+   - Append-only `game_events` table with unique `(room_id, sequence)` constraint, deterministic `gameReducer` replay, idempotency deduplication, cryptographic HMAC-SHA256 tamper verification, and total server memory crash recovery.
+6. **Phase 5 — Redis Ephemeral Cache & Distributed Locks**: ⚪ **NEXT**
+   - Ephemeral session/room cache, socket heartbeat presence, and atomic distributed mutex lock (`lock:room:<roomId>`) to eliminate concurrency race conditions during simultaneous action submissions.
+7. **Phase 6 — Mid-Game Session Reconnection & Socket Recovery**: ⚪
+   - Monotonic sequence catchup (`missedEvents: [lastSeq+1 .. currentSeq]`) within the 60s disconnection grace period for zero desynchronization.
+8. **Phase 7 — Decoupled AI Lore Engine & Procedural Fallback**: ⚪
+   - Asynchronous narrative generation via BullMQ worker with 3-second SLA timeout and deterministic procedural template fallback.
+9. **Phase 8 — Production Hardening & Enterprise Scale Verification**: ⚪
+   - Docker containerization, 100 concurrent rooms load testing, CI/CD pipeline, and deployment guide.
 
 ---
 
 ## 8. v1.0 Definition of Done (DoD) Checklist
 
-- [x] **75 Roles Schema & Registry**: Complete database with 79 abilities.
-- [x] **Deterministic Engine**: Action resolution, death cascade, vote weight, transformations.
-- [x] **Host-Authoritative Validation**: Base packet validation and spoof rejection.
-- [ ] **Dedicated Game Server**: Node.js/Fastify WSS service replacing public MQTT broker.
-- [ ] **Cryptographic Session Auth**: JWT handshake with anti-impersonation guarantee.
-- [ ] **Stateful Reconnect**: Redis event-log replay for dropped connections.
-- [ ] **Automated Role Contract Tests**: Scenario matrix verifying contract constraints across all 75 roles.
-- [ ] **Decoupled AI Queue**: Background worker with 3-second timeout and 100% deterministic fallback.
-- [ ] **Full Production Deployment**: Dockerized container stack deployed to scalable cloud VPS.
+- [x] **Phase 0 — 75 Roles Schema & Registry**: Complete database with 79 abilities, balance engine, and frozen baseline.
+- [x] **Phase 1 — Canonical Contract Lock**: 12 formal contracts formalized in `src/contracts/index.ts` with 100% test coverage.
+- [x] **Phase 2 — Authoritative Server Gateway**: Fastify HTTP/WSS gateway with JWT session authentication and Fog-of-War state isolation.
+- [x] **Phase 3 — Client WebSocket Adapter**: Full client transport adapter enforcing optimistic interaction with authoritative server state.
+- [x] **Phase 4 — PostgreSQL Event Store & Replay**: Append-only event store, deterministic replay engine, idempotency deduplication, HMAC tamper detection, and verified total crash recovery.
+- [ ] **Phase 5 — Redis Ephemeral Cache & Distributed Locks**: Ephemeral presence TTL, active sockets, and atomic room mutex locking.
+- [ ] **Phase 6 — Stateful Reconnection**: Delta event resync and seamless reconnect protocol for dropped connections.
+- [ ] **Phase 7 — Decoupled AI Lore Queue**: Background narrative worker with 3-second SLA timeout and procedural fallback templates.
+- [ ] **Phase 8 — Full Production Hardening**: Dockerized multi-service stack, load-tested at 100 concurrent rooms with zero state corruption.
+

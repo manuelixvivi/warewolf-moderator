@@ -107,8 +107,7 @@ export class PostgresEventStore implements IEventStore {
     await this.init();
     const query = `
       INSERT INTO game_events (event_id, room_id, sequence, event_type, actor_id, payload, server_signature, timestamp)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (room_id, sequence) DO NOTHING;
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
     `;
     await this.pool.query(query, [
       event.eventId,
@@ -131,8 +130,7 @@ export class PostgresEventStore implements IEventStore {
       for (const event of events) {
         const query = `
           INSERT INTO game_events (event_id, room_id, sequence, event_type, actor_id, payload, server_signature, timestamp)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          ON CONFLICT (room_id, sequence) DO NOTHING;
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
         `;
         await client.query(query, [
           event.eventId,

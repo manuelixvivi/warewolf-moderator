@@ -140,6 +140,7 @@ export class RoomManager {
       eventLog: [],
       clients: new Map(),
       disconnectTimers: new Map(),
+      processedCommandIds: new Set(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

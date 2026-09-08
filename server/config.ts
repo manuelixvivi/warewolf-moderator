@@ -33,3 +33,27 @@ export function signGameEvent(roomId: string, sequence: number, type: string, pa
   const data = `${roomId}:${sequence}:${type}:${JSON.stringify(payload)}`;
   return crypto.createHmac("sha256", config.hmacSecret).update(data).digest("hex");
 }
+
+/**
+ * Cryptographically audits an HMAC-SHA256 signature for an immutable GameEvent.
+ * Detects any payload, sequence, or tampering modification.
+ */
+export function verifyGameEventSignature(event: {
+  roomId: string;
+  sequence: number;
+  type: string;
+  payload: any;
+  serverSignature: string;
+}): boolean {
+  if (!event.serverSignature) return false;
+  const expected = signGameEvent(event.roomId, event.sequence, event.type, event.payload);
+  try {
+    const sigBuf = Buffer.from(event.serverSignature, "hex");
+    const expBuf = Buffer.from(expected, "hex");
+    if (sigBuf.length !== expBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, expBuf);
+  } catch {
+    return false;
+  }
+}
+

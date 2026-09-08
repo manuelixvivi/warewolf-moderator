@@ -40,6 +40,7 @@ export interface AuthoritativeRoomState {
   disconnectTimers: Map<string, NodeJS.Timeout>; // playerId -> grace period timer
   selectedRolePool?: string[]; // For Mode 2 pool
   fixedRoles?: string[]; // For Mode 1
+  processedCommandIds?: Set<string>; // Idempotency tracking: prevents duplicate execution of retransmitted commands
   createdAt: number;
   updatedAt: number;
 }
@@ -55,7 +56,8 @@ export interface SessionTokenPayload {
 export interface CommandValidationResult<T = any> {
   isValid: boolean;
   error?: string;
-  errorCode?: "AUTH_FAILED" | "INVALID_SCHEMA" | "INVALID_PHASE" | "PLAYER_DEAD" | "NOT_PERMITTED";
+  errorCode?: "AUTH_FAILED" | "INVALID_SCHEMA" | "INVALID_PHASE" | "PLAYER_DEAD" | "NOT_PERMITTED" | "DUPLICATE_COMMAND";
+  isDuplicate?: boolean;
   command?: BaseCommand<T>;
   player?: PlayerEngineState;
 }

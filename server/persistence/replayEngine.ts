@@ -9,6 +9,7 @@ import { AuthoritativeRoomState } from "../types";
 import { IEventStore } from "./eventStore";
 import { PlayerEngineState } from "../../src/lib/engine/types";
 import { ALL_ROLES, ROLE_BY_ID, buildEngineNightActions } from "../../src/lib/engine/abilityRegistry";
+import { verifyGameEventSignature } from "../config";
 
 export class ReplayEngine {
   /**
@@ -61,6 +62,7 @@ export class ReplayEngine {
           eventLog: [event],
           clients: new Map(),
           disconnectTimers: new Map(),
+          processedCommandIds: new Set(),
           createdAt: event.timestamp,
           updatedAt: event.timestamp,
         };
@@ -307,20 +309,53 @@ export class ReplayEngine {
 
   /**
    * Reconstructs an AuthoritativeRoomState from an event sequence.
+   * Performs cryptographic HMAC-SHA256 signature auditing to detect tampering.
    */
   public static async reconstructState(
     roomId: string,
     eventStore: IEventStore,
-    upToSequence?: number
+    upToSequence?: number,
+    options?: { verifySignatures?: boolean }
   ): Promise<AuthoritativeRoomState | null> {
+    const verifySignatures = options?.verifySignatures ?? true;
     const events = await eventStore.getEvents(roomId, 1, upToSequence);
     if (events.length === 0) return null;
 
     let state: AuthoritativeRoomState | null = null;
     for (const event of events) {
+      if (verifySignatures) {
+        const isValid = verifyGameEventSignature(event);
+        if (!isValid) {
+          throw new Error(
+            `[TamperDetected] Cryptographic HMAC-SHA256 signature verification failed for event ${event.eventId} (sequence ${event.sequence}, type ${event.type}) in room ${roomId}. Event payload or signature has been modified!`
+          );
+        }
+      }
       state = this.gameReducer(state, event);
     }
 
     return state;
+  }
+
+  /**
+   * Audits cryptographic integrity for all stored events of a room.
+   */
+  public static async auditIntegrity(
+    roomId: string,
+    eventStore: IEventStore
+  ): Promise<{ valid: boolean; totalAudited: number; tamperedEvent?: GameEvent; error?: string }> {
+    const events = await eventStore.getEvents(roomId);
+    for (const event of events) {
+      const isValid = verifyGameEventSignature(event);
+      if (!isValid) {
+        return {
+          valid: false,
+          totalAudited: events.length,
+          tamperedEvent: event,
+          error: `Tamper detected on event ${event.eventId} at sequence ${event.sequence}`,
+        };
+      }
+    }
+    return { valid: true, totalAudited: events.length };
   }
 }
