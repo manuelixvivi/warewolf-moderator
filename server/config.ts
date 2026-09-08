@@ -1,0 +1,35 @@
+// ============================================================
+// ASPIRE: WEREWOLF — Authoritative Server Configuration
+// Enterprise Server Architecture (Phase 2)
+// "Server owns the state. Engine resolves truth. Secrets stay sealed."
+// ============================================================
+
+import crypto from "crypto";
+
+export interface ServerConfig {
+  port: number;
+  host: string;
+  jwtSecret: string;
+  hmacSecret: string;
+  corsOrigin: string;
+  disconnectGracePeriodMs: number; // 60s reconnection window before elimination
+  heartbeatIntervalMs: number;     // 15s ping-pong
+}
+
+export const config: ServerConfig = {
+  port: parseInt(process.env.PORT || process.env.ASPIRE_PORT || "4000", 10),
+  host: process.env.HOST || process.env.ASPIRE_HOST || "0.0.0.0",
+  jwtSecret: process.env.ASPIRE_JWT_SECRET || "aspire-authoritative-jwt-secret-dev-mode-32char+",
+  hmacSecret: process.env.ASPIRE_HMAC_SECRET || "aspire-hmac-sha256-signature-secret-key-32c+",
+  corsOrigin: process.env.ASPIRE_CORS_ORIGIN || "*",
+  disconnectGracePeriodMs: 60_000,
+  heartbeatIntervalMs: 15_000,
+};
+
+/**
+ * Creates an HMAC-SHA256 signature for server-signed GameEvents.
+ */
+export function signGameEvent(roomId: string, sequence: number, type: string, payload: any): string {
+  const data = `${roomId}:${sequence}:${type}:${JSON.stringify(payload)}`;
+  return crypto.createHmac("sha256", config.hmacSecret).update(data).digest("hex");
+}
