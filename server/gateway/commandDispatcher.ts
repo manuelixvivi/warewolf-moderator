@@ -225,11 +225,19 @@ export class CommandDispatcher {
 
       try {
         switch (command.type) {
+          case "JOIN_ROOM": {
+            const { playerName } = command.payload || {};
+            await RoomManager.joinRoom(
+              command.roomId,
+              command.senderId,
+              playerName || "Player",
+              commandContext
+            );
+            break;
+          }
+
           case "TOGGLE_READY": {
-            RoomManager.toggleReady(command.roomId, command.senderId);
-            await defaultEventStore.recordCommand(commandContext);
-            if (!room.processedCommandIds) room.processedCommandIds = new Set();
-            room.processedCommandIds.add(command.commandId);
+            await RoomManager.toggleReady(command.roomId, command.senderId, commandContext);
             break;
           }
 

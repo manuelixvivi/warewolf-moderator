@@ -110,6 +110,21 @@ export class ReplayEngine {
         };
       }
 
+      case "PLAYER_READY_CHANGED": {
+        if (!state) throw new Error("Cannot apply PLAYER_READY_CHANGED on uninitialized state.");
+        const { playerId, isReady } = event.payload || {};
+        const players = state.players.map((p) =>
+          p.id === playerId ? { ...p, isReady: Boolean(isReady) } : p
+        );
+        return {
+          ...state,
+          players,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
       case "GAME_STARTED": {
         if (!state) throw new Error("Cannot apply GAME_STARTED on uninitialized state.");
         return {
@@ -446,6 +461,33 @@ export class ReplayEngine {
         ...(state.processedCommandIds ? Array.from(state.processedCommandIds) : []),
         ...Array.from(persistedCommands),
       ]);
+
+      // Re-arm disconnect timers if a player disconnected and deadline hasn't elapsed yet
+      const lastDisconnectEvents = new Map<string, { disconnectDeadline?: number }>();
+      for (const ev of events) {
+        if (ev.type === "PLAYER_DISCONNECTED") {
+          lastDisconnectEvents.set(ev.payload.playerId, ev.payload);
+        } else if (ev.type === "PLAYER_RECONNECTED") {
+          lastDisconnectEvents.delete(ev.payload.playerId);
+        }
+      }
+      for (const [playerId, payload] of lastDisconnectEvents) {
+        if (payload?.disconnectDeadline) {
+          const remainingMs = payload.disconnectDeadline - Date.now();
+          if (remainingMs > 0) {
+            const timer = setTimeout(() => {
+              state?.disconnectTimers.delete(playerId);
+              if (state?.phase === "LOBBY") {
+                state.players = state.players.filter((p) => p.id !== playerId);
+              }
+            }, remainingMs);
+            state.disconnectTimers.set(playerId, timer);
+          } else if (state.phase === "LOBBY") {
+            // Grace period already expired while server was offline
+            state.players = state.players.filter((p) => p.id !== playerId);
+          }
+        }
+      }
     }
 
     return state;

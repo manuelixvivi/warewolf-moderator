@@ -16,11 +16,30 @@ export interface ServerConfig {
   heartbeatIntervalMs: number;     // 15s ping-pong
 }
 
+const isProduction = process.env.NODE_ENV === "production";
+const devJwtDefault = "aspire-authoritative-jwt-secret-dev-mode-32char+";
+const devHmacDefault = "aspire-hmac-sha256-signature-secret-key-32c+";
+
+if (isProduction) {
+  if (!process.env.ASPIRE_JWT_SECRET || process.env.ASPIRE_JWT_SECRET === devJwtDefault) {
+    throw new Error(
+      "[FATAL_SECURITY_ERROR] Running in production mode (NODE_ENV=production) without a secure ASPIRE_JWT_SECRET.\n" +
+      "Default development secrets are strictly prohibited in production."
+    );
+  }
+  if (!process.env.ASPIRE_HMAC_SECRET || process.env.ASPIRE_HMAC_SECRET === devHmacDefault) {
+    throw new Error(
+      "[FATAL_SECURITY_ERROR] Running in production mode (NODE_ENV=production) without a secure ASPIRE_HMAC_SECRET.\n" +
+      "Default development secrets are strictly prohibited in production."
+    );
+  }
+}
+
 export const config: ServerConfig = {
   port: parseInt(process.env.PORT || process.env.ASPIRE_PORT || "4000", 10),
   host: process.env.HOST || process.env.ASPIRE_HOST || "0.0.0.0",
-  jwtSecret: process.env.ASPIRE_JWT_SECRET || "aspire-authoritative-jwt-secret-dev-mode-32char+",
-  hmacSecret: process.env.ASPIRE_HMAC_SECRET || "aspire-hmac-sha256-signature-secret-key-32c+",
+  jwtSecret: process.env.ASPIRE_JWT_SECRET || devJwtDefault,
+  hmacSecret: process.env.ASPIRE_HMAC_SECRET || devHmacDefault,
   corsOrigin: process.env.ASPIRE_CORS_ORIGIN || "*",
   disconnectGracePeriodMs: 60_000,
   heartbeatIntervalMs: 15_000,

@@ -123,6 +123,7 @@ export interface CastVoteCommandPayload {
 export type GameEventType =
   | "ROOM_INITIALIZED"
   | "PLAYER_JOINED"
+  | "PLAYER_READY_CHANGED"
   | "PLAYER_DISCONNECTED"
   | "PLAYER_RECONNECTED"
   | "GAME_STARTED"
@@ -137,6 +138,11 @@ export type GameEventType =
   | "TIMEOUT_OCCURRED"
   | "WIN_CONDITION_SATISFIED"
   | "NARRATIVE_LORE_EMITTED";
+
+export interface PlayerReadyChangedPayload {
+  playerId: string;
+  isReady: boolean;
+}
 
 export interface GameEvent<T = any> {
   eventId: string;          // UUIDv7 (Time-ordered)

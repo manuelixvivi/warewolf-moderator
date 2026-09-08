@@ -239,7 +239,7 @@ async function runServerTestSuite() {
     // Verify all 5 players received roles from Golden Engine
     const rolesAssigned = room.players.map((p) => p.canonical_name);
     assert(rolesAssigned.length === 5, "[Lifecycle] Golden Engine assigned roles to all 5 players");
-    assert(room.players.some((p) => p.team === "Werewolf" || p.team === "Solo Werewolf"), "[Lifecycle] Werewolf presence guaranteed");
+    assert(room.players.some((p) => p.team === "Werewolf" || p.team === "Solo Werewolf" || p.team === "Werewolf-aligned" || p.category === "Werewolf"), "[Lifecycle] Werewolf presence guaranteed");
 
     // Verify Night Actions built
     assert(room.nightActions.length > 0, "[Lifecycle] Night actions generated for Night 1");

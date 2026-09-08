@@ -57,6 +57,21 @@ export interface IEventStore {
     },
     initEvent: GameEvent
   ): Promise<void>;
+  joinRoomAtomic(
+    participant: {
+      roomId: string;
+      playerId: string;
+      playerName: string;
+      isHost?: boolean;
+      roleId?: string;
+      canonicalName?: string;
+      team?: string;
+      alive?: boolean;
+      joinedAt?: number;
+    },
+    joinEvent: GameEvent,
+    command?: CommandRecord
+  ): Promise<{ isDuplicate: boolean }>;
   appendEvent<T = any>(event: GameEvent<T>): Promise<void>;
   appendBatch(events: GameEvent[]): Promise<void>;
   appendEventWithCommand<T = any>(
@@ -271,6 +286,104 @@ export class PostgresEventStore implements IEventStore {
       );
 
       await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  public async joinRoomAtomic(
+    participant: {
+      roomId: string;
+      playerId: string;
+      playerName: string;
+      isHost?: boolean;
+      roleId?: string;
+      canonicalName?: string;
+      team?: string;
+      alive?: boolean;
+      joinedAt?: number;
+    },
+    joinEvent: GameEvent,
+    command?: CommandRecord
+  ): Promise<{ isDuplicate: boolean }> {
+    await this.init();
+    const client = await this.pool.connect();
+    const now = Date.now();
+    try {
+      await client.query("BEGIN");
+
+      // 1. Transactional idempotency check (if command provided)
+      if (command) {
+        const checkRes = await client.query(
+          `SELECT 1 FROM processed_commands WHERE command_id = $1 AND room_id = $2;`,
+          [command.commandId, command.roomId]
+        );
+        if ((checkRes.rowCount ?? 0) > 0) {
+          await client.query("ROLLBACK");
+          return { isDuplicate: true };
+        }
+      }
+
+      // 2. Insert match_participant read-model projection
+      await client.query(
+        `INSERT INTO match_participants (room_id, player_id, player_name, role_id, canonical_name, team, alive, is_host, joined_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (room_id, player_id) DO UPDATE
+         SET player_name = EXCLUDED.player_name,
+             role_id = COALESCE(EXCLUDED.role_id, match_participants.role_id),
+             canonical_name = COALESCE(EXCLUDED.canonical_name, match_participants.canonical_name),
+             team = COALESCE(EXCLUDED.team, match_participants.team),
+             alive = EXCLUDED.alive;`,
+        [
+          participant.roomId,
+          participant.playerId,
+          participant.playerName,
+          participant.roleId || null,
+          participant.canonicalName || null,
+          participant.team || null,
+          participant.alive !== undefined ? participant.alive : true,
+          participant.isHost || false,
+          participant.joinedAt || now,
+        ]
+      );
+
+      // 3. Insert canonical PLAYER_JOINED event into historical event log
+      await client.query(
+        `INSERT INTO game_events (event_id, room_id, sequence, event_type, actor_id, payload, server_signature, timestamp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
+        [
+          joinEvent.eventId,
+          joinEvent.roomId,
+          joinEvent.sequence,
+          joinEvent.type,
+          joinEvent.actorId || null,
+          canonicalJsonStringify(joinEvent.payload),
+          joinEvent.serverSignature,
+          joinEvent.timestamp || now,
+        ]
+      );
+
+      // 4. Record command persistently if provided
+      if (command) {
+        await client.query(
+          `INSERT INTO processed_commands (command_id, room_id, sender_id, command_type, processed_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (command_id) DO NOTHING;`,
+          [
+            command.commandId,
+            command.roomId,
+            command.senderId,
+            command.commandType,
+            command.processedAt || now,
+          ]
+        );
+      }
+
+      await client.query("COMMIT");
+      return { isDuplicate: false };
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
@@ -525,6 +638,35 @@ export class InMemoryEventStore implements IEventStore {
     await this.saveMatch(match);
     await this.saveParticipant(hostParticipant);
     await this.appendEvent(initEvent);
+  }
+
+  public async joinRoomAtomic(
+    participant: any,
+    joinEvent: GameEvent,
+    command?: CommandRecord
+  ): Promise<{ isDuplicate: boolean }> {
+    if (command && (await this.isCommandProcessed(command.roomId, command.commandId))) {
+      return { isDuplicate: true };
+    }
+    let roomParts = this.participants.get(participant.roomId);
+    const oldParticipant = roomParts?.get(participant.playerId);
+
+    await this.saveParticipant(participant);
+    try {
+      await this.appendEvent(joinEvent);
+    } catch (err) {
+      if (oldParticipant) {
+        roomParts!.set(participant.playerId, oldParticipant);
+      } else if (roomParts) {
+        roomParts.delete(participant.playerId);
+      }
+      throw err;
+    }
+
+    if (command) {
+      await this.recordCommand(command);
+    }
+    return { isDuplicate: false };
   }
 
   public async appendEvent<T = any>(event: GameEvent<T>): Promise<void> {

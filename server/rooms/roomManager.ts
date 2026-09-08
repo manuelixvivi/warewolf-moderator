@@ -324,7 +324,8 @@ export class RoomManager {
   public static async joinRoom(
     roomId: string,
     playerId: string,
-    playerName: string
+    playerName: string,
+    commandContext?: CommandRecord
   ): Promise<{ room: AuthoritativeRoomState; sessionToken: string }> {
     return this.enqueueRoomOperation(roomId, async () => {
       const room = this.rooms.get(roomId);
@@ -363,8 +364,24 @@ export class RoomManager {
           hasUsedAbility: false,
         };
 
-        if (defaultEventStore.saveParticipant) {
-          await defaultEventStore.saveParticipant({
+        const candidateSequence = room.sequenceNumber + 1;
+        const joinPayload = { playerId, playerName };
+        const signature = signGameEvent(room.roomId, candidateSequence, "PLAYER_JOINED", joinPayload);
+        const joinEvent: GameEvent = {
+          eventId: uuidv7(),
+          roomId: room.roomId,
+          sequence: candidateSequence,
+          timestamp: Date.now(),
+          type: "PLAYER_JOINED",
+          actorId: playerId,
+          payload: joinPayload,
+          serverSignature: signature,
+        };
+
+        // 1. ATOMIC TRANSACTION: participant projection + PLAYER_JOINED event + command idempotency
+        // All committed in a single atomic SQL transaction (BEGIN ... COMMIT).
+        const { isDuplicate } = await defaultEventStore.joinRoomAtomic(
+          {
             roomId,
             playerId,
             playerName,
@@ -373,18 +390,33 @@ export class RoomManager {
             canonicalName: candidatePlayer.canonical_name,
             team: candidatePlayer.team,
             alive: true,
-          });
+            joinedAt: joinEvent.timestamp,
+          },
+          joinEvent,
+          commandContext
+        );
+
+        if (isDuplicate) {
+          const sessionToken = SessionManager.createSessionToken(
+            playerId,
+            playerName,
+            roomId,
+            false
+          );
+          return { room, sessionToken };
         }
 
-        // Await database persistence BEFORE mutating room.players array in RAM
-        await this.appendEvent(room, "PLAYER_JOINED", playerId, {
-          playerId,
-          playerName,
-        });
-
-        // Commit candidate player to RAM only after database confirms event persistence
+        // 2. Commit candidate player and event to RAM ONLY after database confirms atomic persistence
+        room.sequenceNumber = candidateSequence;
+        room.eventLog.push(joinEvent);
+        room.updatedAt = joinEvent.timestamp;
         existingPlayer = candidatePlayer;
         room.players.push(existingPlayer);
+
+        if (commandContext) {
+          if (!room.processedCommandIds) room.processedCommandIds = new Set();
+          room.processedCommandIds.add(commandContext.commandId);
+        }
       }
 
       const sessionToken = SessionManager.createSessionToken(
@@ -400,8 +432,14 @@ export class RoomManager {
 
   /**
    * Toggles ready state in lobby.
+   * STRICT PERSISTENCE INVARIANT:
+   * Commits PLAYER_READY_CHANGED event to PostgreSQL before mutating RAM player state.
    */
-  public static toggleReady(roomId: string, playerId: string): AuthoritativeRoomState {
+  public static async toggleReady(
+    roomId: string,
+    playerId: string,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
     if (room.phase !== "LOBBY") throw new Error("Ready state can only be toggled in LOBBY.");
@@ -409,7 +447,22 @@ export class RoomManager {
     const player = room.players.find((p) => p.id === playerId);
     if (!player) throw new Error(`Player ${playerId} not found in room.`);
 
-    player.isReady = !player.isReady;
+    const newReadyState = !player.isReady;
+
+    // 1. AWAIT database append first (strict historical truth before RAM commit)
+    await this.appendEvent(
+      room,
+      "PLAYER_READY_CHANGED",
+      playerId,
+      {
+        playerId,
+        isReady: newReadyState,
+      },
+      commandContext
+    );
+
+    // 2. Only upon successful persistence commit, update authoritative state in RAM
+    player.isReady = newReadyState;
     room.updatedAt = Date.now();
     return room;
   }
@@ -896,7 +949,11 @@ export class RoomManager {
 
     room.clients.delete(playerId);
 
-    await this.appendEvent(room, "PLAYER_DISCONNECTED", playerId, { playerId });
+    const disconnectDeadline = Date.now() + config.disconnectGracePeriodMs;
+    await this.appendEvent(room, "PLAYER_DISCONNECTED", playerId, {
+      playerId,
+      disconnectDeadline,
+    });
 
     // Set grace period timer
     const timer = setTimeout(() => {
