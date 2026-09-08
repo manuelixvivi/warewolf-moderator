@@ -20,19 +20,26 @@ const isProduction = process.env.NODE_ENV === "production";
 const devJwtDefault = "aspire-authoritative-jwt-secret-dev-mode-32char+";
 const devHmacDefault = "aspire-hmac-sha256-signature-secret-key-32c+";
 
+export function validateProductionSecrets(): void {
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction) {
+    if (!process.env.ASPIRE_JWT_SECRET || process.env.ASPIRE_JWT_SECRET === devJwtDefault) {
+      throw new Error(
+        "[FATAL_SECURITY_ERROR] Running in production mode (NODE_ENV=production) without a secure ASPIRE_JWT_SECRET.\n" +
+        "Default development secrets are strictly prohibited in production."
+      );
+    }
+    if (!process.env.ASPIRE_HMAC_SECRET || process.env.ASPIRE_HMAC_SECRET === devHmacDefault) {
+      throw new Error(
+        "[FATAL_SECURITY_ERROR] Running in production mode (NODE_ENV=production) without a secure ASPIRE_HMAC_SECRET.\n" +
+        "Default development secrets are strictly prohibited in production."
+      );
+    }
+  }
+}
+
 if (isProduction) {
-  if (!process.env.ASPIRE_JWT_SECRET || process.env.ASPIRE_JWT_SECRET === devJwtDefault) {
-    throw new Error(
-      "[FATAL_SECURITY_ERROR] Running in production mode (NODE_ENV=production) without a secure ASPIRE_JWT_SECRET.\n" +
-      "Default development secrets are strictly prohibited in production."
-    );
-  }
-  if (!process.env.ASPIRE_HMAC_SECRET || process.env.ASPIRE_HMAC_SECRET === devHmacDefault) {
-    throw new Error(
-      "[FATAL_SECURITY_ERROR] Running in production mode (NODE_ENV=production) without a secure ASPIRE_HMAC_SECRET.\n" +
-      "Default development secrets are strictly prohibited in production."
-    );
-  }
+  validateProductionSecrets();
 }
 
 export const config: ServerConfig = {

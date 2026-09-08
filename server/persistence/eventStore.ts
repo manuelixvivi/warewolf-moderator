@@ -14,7 +14,7 @@ export interface MatchRecord {
   gameMode: string;
   hostPlayerId: string;
   hostPlayerName: string;
-  status?: "ACTIVE" | "COMPLETED" | "ABANDONED";
+  status?: "ACTIVE" | "COMPLETED" | "ABANDONED" | "FINISHED" | string;
   winner?: string;
   winReason?: string;
   createdAt?: number;
@@ -29,46 +29,43 @@ export interface CommandRecord {
   processedAt?: number;
 }
 
+export interface ParticipantRecord {
+  roomId: string;
+  playerId: string;
+  playerName: string;
+  isHost?: boolean;
+  roleId?: string;
+  canonicalName?: string;
+  team?: string;
+  alive?: boolean;
+  joinedAt?: number;
+}
+
 export interface IEventStore {
   saveMatch(match: MatchRecord): Promise<void>;
-  saveParticipant?(participant: {
-    roomId: string;
-    playerId: string;
-    playerName: string;
-    isHost?: boolean;
-    roleId?: string;
-    canonicalName?: string;
-    team?: string;
-    alive?: boolean;
-    joinedAt?: number;
-  }): Promise<void>;
+  updateMatchStatus?(
+    roomId: string,
+    status: string,
+    winner?: string,
+    winReason?: string
+  ): Promise<void>;
+  saveParticipant?(participant: ParticipantRecord): Promise<void>;
+  updateParticipant?(
+    roomId: string,
+    playerId: string,
+    updates: Partial<ParticipantRecord>
+  ): Promise<void>;
+  updateParticipantsBatch?(
+    roomId: string,
+    updates: Array<{ playerId: string } & Partial<ParticipantRecord>>
+  ): Promise<void>;
   createRoomAtomic(
     match: MatchRecord,
-    hostParticipant: {
-      roomId: string;
-      playerId: string;
-      playerName: string;
-      isHost?: boolean;
-      roleId?: string;
-      canonicalName?: string;
-      team?: string;
-      alive?: boolean;
-      joinedAt?: number;
-    },
+    hostParticipant: ParticipantRecord,
     initEvent: GameEvent
   ): Promise<void>;
   joinRoomAtomic(
-    participant: {
-      roomId: string;
-      playerId: string;
-      playerName: string;
-      isHost?: boolean;
-      roleId?: string;
-      canonicalName?: string;
-      team?: string;
-      alive?: boolean;
-      joinedAt?: number;
-    },
+    participant: ParticipantRecord,
     joinEvent: GameEvent,
     command?: CommandRecord
   ): Promise<{ isDuplicate: boolean }>;
@@ -190,17 +187,7 @@ export class PostgresEventStore implements IEventStore {
     ]);
   }
 
-  public async saveParticipant(p: {
-    roomId: string;
-    playerId: string;
-    playerName: string;
-    isHost?: boolean;
-    roleId?: string;
-    canonicalName?: string;
-    team?: string;
-    alive?: boolean;
-    joinedAt?: number;
-  }): Promise<void> {
+  public async saveParticipant(p: ParticipantRecord): Promise<void> {
     await this.init();
     const query = `
       INSERT INTO match_participants (room_id, player_id, player_name, role_id, canonical_name, team, alive, is_host, joined_at)
@@ -222,6 +209,106 @@ export class PostgresEventStore implements IEventStore {
       p.isHost || false,
       p.joinedAt || Date.now(),
     ]);
+  }
+
+  public async updateMatchStatus(
+    roomId: string,
+    status: string,
+    winner?: string,
+    winReason?: string
+  ): Promise<void> {
+    await this.init();
+    const query = `
+      UPDATE matches
+      SET status = $2,
+          winner = COALESCE($3, winner),
+          win_reason = COALESCE($4, win_reason),
+          updated_at = $5
+      WHERE room_id = $1;
+    `;
+    await this.pool.query(query, [roomId, status, winner || null, winReason || null, Date.now()]);
+  }
+
+  public async updateParticipant(
+    roomId: string,
+    playerId: string,
+    updates: Partial<ParticipantRecord>
+  ): Promise<void> {
+    await this.init();
+    const sets: string[] = [];
+    const values: any[] = [roomId, playerId];
+    let idx = 3;
+
+    if (updates.roleId !== undefined) {
+      sets.push(`role_id = $${idx++}`);
+      values.push(updates.roleId);
+    }
+    if (updates.canonicalName !== undefined) {
+      sets.push(`canonical_name = $${idx++}`);
+      values.push(updates.canonicalName);
+    }
+    if (updates.team !== undefined) {
+      sets.push(`team = $${idx++}`);
+      values.push(updates.team);
+    }
+    if (updates.alive !== undefined) {
+      sets.push(`alive = $${idx++}`);
+      values.push(updates.alive);
+    }
+
+    if (sets.length === 0) return;
+
+    const query = `
+      UPDATE match_participants
+      SET ${sets.join(", ")}
+      WHERE room_id = $1 AND player_id = $2;
+    `;
+    await this.pool.query(query, values);
+  }
+
+  public async updateParticipantsBatch(
+    roomId: string,
+    updates: Array<{ playerId: string } & Partial<ParticipantRecord>>
+  ): Promise<void> {
+    await this.init();
+    if (updates.length === 0) return;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const u of updates) {
+        const sets: string[] = [];
+        const values: any[] = [roomId, u.playerId];
+        let idx = 3;
+        if (u.roleId !== undefined) {
+          sets.push(`role_id = $${idx++}`);
+          values.push(u.roleId);
+        }
+        if (u.canonicalName !== undefined) {
+          sets.push(`canonical_name = $${idx++}`);
+          values.push(u.canonicalName);
+        }
+        if (u.team !== undefined) {
+          sets.push(`team = $${idx++}`);
+          values.push(u.team);
+        }
+        if (u.alive !== undefined) {
+          sets.push(`alive = $${idx++}`);
+          values.push(u.alive);
+        }
+        if (sets.length > 0) {
+          await client.query(
+            `UPDATE match_participants SET ${sets.join(", ")} WHERE room_id = $1 AND player_id = $2;`,
+            values
+          );
+        }
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   public async createRoomAtomic(
@@ -611,17 +698,22 @@ export class InMemoryEventStore implements IEventStore {
     }
   }
 
-  public async saveParticipant(p: {
-    roomId: string;
-    playerId: string;
-    playerName: string;
-    isHost?: boolean;
-    roleId?: string;
-    canonicalName?: string;
-    team?: string;
-    alive?: boolean;
-    joinedAt?: number;
-  }): Promise<void> {
+  public async updateMatchStatus(
+    roomId: string,
+    status: string,
+    winner?: string,
+    winReason?: string
+  ): Promise<void> {
+    const match = this.matches.get(roomId);
+    if (match) {
+      match.status = status;
+      if (winner !== undefined) match.winner = winner;
+      if (winReason !== undefined) match.winReason = winReason;
+      match.updatedAt = Date.now();
+    }
+  }
+
+  public async saveParticipant(p: ParticipantRecord): Promise<void> {
     let roomParts = this.participants.get(p.roomId);
     if (!roomParts) {
       roomParts = new Map();
@@ -630,14 +722,52 @@ export class InMemoryEventStore implements IEventStore {
     roomParts.set(p.playerId, { ...p });
   }
 
+  public async updateParticipant(
+    roomId: string,
+    playerId: string,
+    updates: Partial<ParticipantRecord>
+  ): Promise<void> {
+    const parts = this.participants.get(roomId);
+    if (parts) {
+      const p = parts.get(playerId);
+      if (p) {
+        Object.assign(p, updates);
+      }
+    }
+  }
+
+  public async updateParticipantsBatch(
+    roomId: string,
+    updates: Array<{ playerId: string } & Partial<ParticipantRecord>>
+  ): Promise<void> {
+    for (const u of updates) {
+      await this.updateParticipant(roomId, u.playerId, u);
+    }
+  }
+
   public async createRoomAtomic(
     match: MatchRecord,
     hostParticipant: any,
     initEvent: GameEvent
   ): Promise<void> {
-    await this.saveMatch(match);
-    await this.saveParticipant(hostParticipant);
-    await this.appendEvent(initEvent);
+    const roomId = match.roomId;
+    const oldMatch = this.matches.get(roomId);
+    const oldParts = this.participants.get(roomId);
+    const oldEvents = this.eventsByRoom.get(roomId);
+
+    try {
+      await this.saveMatch(match);
+      await this.saveParticipant(hostParticipant);
+      await this.appendEvent(initEvent);
+    } catch (err) {
+      if (oldMatch) this.matches.set(roomId, oldMatch);
+      else this.matches.delete(roomId);
+      if (oldParts) this.participants.set(roomId, oldParts);
+      else this.participants.delete(roomId);
+      if (oldEvents) this.eventsByRoom.set(roomId, oldEvents);
+      else this.eventsByRoom.delete(roomId);
+      throw err;
+    }
   }
 
   public async joinRoomAtomic(
@@ -729,9 +859,29 @@ export class InMemoryEventStore implements IEventStore {
     if (await this.isCommandProcessed(command.roomId, command.commandId)) {
       return { isDuplicate: true };
     }
-    await this.appendBatch(events);
-    await this.recordCommand(command);
-    return { isDuplicate: false };
+    const roomId = command.roomId;
+    const existingEvents = this.eventsByRoom.get(roomId);
+    const eventsSnapshot = existingEvents ? [...existingEvents] : undefined;
+    const existingCmds = this.processedCommandsByRoom.get(roomId);
+    const cmdsSnapshot = existingCmds ? new Set(existingCmds) : undefined;
+
+    try {
+      await this.appendBatch(events);
+      await this.recordCommand(command);
+      return { isDuplicate: false };
+    } catch (err) {
+      if (eventsSnapshot !== undefined) {
+        this.eventsByRoom.set(roomId, eventsSnapshot);
+      } else {
+        this.eventsByRoom.delete(roomId);
+      }
+      if (cmdsSnapshot !== undefined) {
+        this.processedCommandsByRoom.set(roomId, cmdsSnapshot);
+      } else {
+        this.processedCommandsByRoom.delete(roomId);
+      }
+      throw err;
+    }
   }
 
   public async getEvents(

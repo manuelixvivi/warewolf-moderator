@@ -50,9 +50,17 @@ export class CommandDispatcher {
       !command.commandId ||
       !command.roomId ||
       !command.senderId ||
-      !command.type ||
-      !command.sessionToken
+      !command.type
     ) {
+      return {
+        isValid: false,
+        error: "Invalid schema: Missing required BaseCommand fields (commandId, roomId, senderId, type).",
+        errorCode: "INVALID_SCHEMA",
+      };
+    }
+
+    // For in-room commands, sessionToken is mandatory.
+    if (command.type !== "JOIN_ROOM" && !command.sessionToken) {
       return {
         isValid: false,
         error: "Invalid schema: Missing required BaseCommand fields (commandId, roomId, senderId, type, sessionToken).",
@@ -60,31 +68,33 @@ export class CommandDispatcher {
       };
     }
 
-    // Tier 2: Authentication (Cryptographic JWT Token Check)
-    const tokenPayload = SessionManager.verifySessionToken(command.sessionToken);
-    if (!tokenPayload) {
-      return {
-        isValid: false,
-        error: "Authentication failed: Invalid or expired sessionToken.",
-        errorCode: "AUTH_FAILED",
-      };
-    }
+    // Tier 2: Authentication (Cryptographic JWT Token Check if provided)
+    if (command.sessionToken) {
+      const tokenPayload = SessionManager.verifySessionToken(command.sessionToken);
+      if (!tokenPayload) {
+        return {
+          isValid: false,
+          error: "Authentication failed: Invalid or expired sessionToken.",
+          errorCode: "AUTH_FAILED",
+        };
+      }
 
-    // Tier 3: Authorization (Sender & Room Matching)
-    if (tokenPayload.playerId !== command.senderId) {
-      return {
-        isValid: false,
-        error: "Authorization failed: senderId does not match authenticated token identity.",
-        errorCode: "NOT_PERMITTED",
-      };
-    }
+      // Tier 3: Authorization (Sender & Room Matching)
+      if (tokenPayload.playerId !== command.senderId) {
+        return {
+          isValid: false,
+          error: "Authorization failed: senderId does not match authenticated token identity.",
+          errorCode: "NOT_PERMITTED",
+        };
+      }
 
-    if (tokenPayload.roomId !== command.roomId) {
-      return {
-        isValid: false,
-        error: "Authorization failed: roomId does not match authenticated token room.",
-        errorCode: "NOT_PERMITTED",
-      };
+      if (tokenPayload.roomId !== command.roomId) {
+        return {
+          isValid: false,
+          error: "Authorization failed: roomId does not match authenticated token room.",
+          errorCode: "NOT_PERMITTED",
+        };
+      }
     }
 
     if (!room) {
@@ -95,6 +105,42 @@ export class CommandDispatcher {
       };
     }
 
+    // Special authorization path: JOIN_ROOM
+    // Allows new players who are not yet members of the room to join
+    if (command.type === "JOIN_ROOM") {
+      if (room.phase !== "LOBBY") {
+        return {
+          isValid: false,
+          error: `Cannot join room: Room ${command.roomId} is in phase ${room.phase}, expected LOBBY.`,
+          errorCode: "INVALID_PHASE",
+        };
+      }
+
+      if (room.players.length >= 16) {
+        return {
+          isValid: false,
+          error: `Cannot join room: Room ${command.roomId} is full (max 16 players).`,
+          errorCode: "NOT_PERMITTED",
+        };
+      }
+
+      if (room.processedCommandIds && room.processedCommandIds.has(command.commandId)) {
+        return {
+          isValid: false,
+          error: `Duplicate command: commandId ${command.commandId} has already been processed.`,
+          errorCode: "DUPLICATE_COMMAND",
+          isDuplicate: true,
+          command,
+        };
+      }
+
+      return {
+        isValid: true,
+        command,
+      };
+    }
+
+    // For all other command types: player MUST already be a member of the room!
     const player = room.players.find((p) => p.id === command.senderId);
     if (!player) {
       return {
@@ -176,6 +222,7 @@ export class CommandDispatcher {
     error?: string;
     errorCode?: string;
     isDuplicate?: boolean;
+    sessionToken?: string;
   }> {
     let rawParsed: any;
     try {
@@ -227,13 +274,17 @@ export class CommandDispatcher {
         switch (command.type) {
           case "JOIN_ROOM": {
             const { playerName } = command.payload || {};
-            await RoomManager.joinRoom(
+            const joinResult = await RoomManager.joinRoom(
               command.roomId,
               command.senderId,
               playerName || "Player",
               commandContext
             );
-            break;
+            FogOfWarDispatcher.dispatchRoomSync(joinResult.room);
+            return {
+              success: true,
+              sessionToken: joinResult.sessionToken,
+            };
           }
 
           case "TOGGLE_READY": {

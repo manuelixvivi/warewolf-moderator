@@ -34,6 +34,7 @@ import {
 } from "../../src/lib/engine/balanceEngine";
 import { SelectedRole } from "../../src/types/game";
 import { defaultEventStore, ReplayEngine, CommandRecord } from "../persistence";
+import { FogOfWarDispatcher } from "../gateway/fogOfWarDispatcher";
 
 export class RoomManager {
   public static rooms = new Map<string, AuthoritativeRoomState>();
@@ -615,6 +616,20 @@ export class RoomManager {
     room.phase = candidatePhase;
     room.nightActions = candidateNightActions;
 
+    // Update query read-model projection in match_participants
+    if (defaultEventStore.updateParticipantsBatch) {
+      await defaultEventStore.updateParticipantsBatch(
+        room.roomId,
+        candidatePlayers.map((p) => ({
+          playerId: p.id,
+          roleId: p.role_id,
+          canonicalName: p.canonical_name,
+          team: p.team,
+          alive: p.alive,
+        }))
+      );
+    }
+
     return room;
   }
 
@@ -753,6 +768,23 @@ export class RoomManager {
     room.phase = candidatePhase;
     room.votes = {};
     room.nightActions = [];
+
+    // Update query read-model projections
+    const deadPlayers = candidatePlayers.filter((p: PlayerEngineState) => !p.alive);
+    if (defaultEventStore.updateParticipantsBatch && deadPlayers.length > 0) {
+      await defaultEventStore.updateParticipantsBatch(
+        room.roomId,
+        deadPlayers.map((p: PlayerEngineState) => ({ playerId: p.id, alive: false }))
+      );
+    }
+    if (candidatePhase === "GAME_OVER" && defaultEventStore.updateMatchStatus) {
+      await defaultEventStore.updateMatchStatus(
+        room.roomId,
+        "FINISHED",
+        winResult.winner || undefined,
+        winResult.reason || undefined
+      );
+    }
 
     return room;
   }
@@ -907,6 +939,20 @@ export class RoomManager {
     room.nightActions = candidateNightActions;
     room.votes = {};
 
+    // Update query read-model projections
+    const eliminated = outcome.eliminatedPlayer;
+    if (defaultEventStore.updateParticipant && eliminated) {
+      await defaultEventStore.updateParticipant(room.roomId, eliminated.id, { alive: false });
+    }
+    if (candidatePhase === "GAME_OVER" && defaultEventStore.updateMatchStatus) {
+      await defaultEventStore.updateMatchStatus(
+        room.roomId,
+        "FINISHED",
+        winResult.winner || undefined,
+        winResult.reason || undefined
+      );
+    }
+
     return room;
   }
 
@@ -941,7 +987,7 @@ export class RoomManager {
   }
 
   /**
-   * Handles client socket disconnection with 60-second grace period.
+   * Handles client socket disconnection with grace period.
    */
   public static async handleClientDisconnect(roomId: string, playerId: string): Promise<void> {
     const room = this.rooms.get(roomId);
@@ -955,15 +1001,53 @@ export class RoomManager {
       disconnectDeadline,
     });
 
-    // Set grace period timer
-    const timer = setTimeout(() => {
+    // Set grace period timer that triggers authoritative disconnect timeout
+    const timer = setTimeout(async () => {
       room.disconnectTimers.delete(playerId);
-      // If still in lobby, remove player; if in-game, player remains marked disconnected
-      if (room.phase === "LOBBY") {
-        room.players = room.players.filter((p) => p.id !== playerId);
+      try {
+        await RoomManager.handleDisconnectTimeout(roomId, playerId);
+      } catch (err) {
+        console.error(`Error handling disconnect timeout for ${playerId} in ${roomId}:`, err);
       }
     }, config.disconnectGracePeriodMs);
 
     room.disconnectTimers.set(playerId, timer);
+  }
+
+  /**
+   * Authoritative disconnect timeout handler:
+   * Commits canonical PLAYER_DISCONNECT_TIMEOUT event to database before mutating RAM.
+   */
+  public static async handleDisconnectTimeout(roomId: string, playerId: string): Promise<void> {
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) return;
+
+      const player = room.players.find((p) => p.id === playerId);
+      if (!player) return;
+
+      // 1. Commit canonical event PLAYER_DISCONNECT_TIMEOUT to EventStore first
+      await this.appendEvent(room, "PLAYER_DISCONNECT_TIMEOUT", playerId, {
+        playerId,
+        phase: room.phase,
+        reason: "Disconnect grace period expired without reconnection.",
+      });
+
+      // 2. Mutate RAM state only after persistence commit
+      if (room.phase === "LOBBY") {
+        room.players = room.players.filter((p) => p.id !== playerId);
+        if (defaultEventStore.updateParticipant) {
+          await defaultEventStore.updateParticipant(roomId, playerId, { alive: false });
+        }
+      } else {
+        // In active game, player is forfeited/eliminated
+        player.alive = false;
+        if (defaultEventStore.updateParticipant) {
+          await defaultEventStore.updateParticipant(roomId, playerId, { alive: false });
+        }
+      }
+
+      FogOfWarDispatcher.dispatchRoomSync(room);
+    });
   }
 }

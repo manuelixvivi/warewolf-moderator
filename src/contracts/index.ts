@@ -136,12 +136,19 @@ export type GameEventType =
   | "VOTE_CAST"
   | "VOTE_RESOLVED"
   | "TIMEOUT_OCCURRED"
+  | "PLAYER_DISCONNECT_TIMEOUT"
   | "WIN_CONDITION_SATISFIED"
   | "NARRATIVE_LORE_EMITTED";
 
 export interface PlayerReadyChangedPayload {
   playerId: string;
   isReady: boolean;
+}
+
+export interface PlayerDisconnectTimeoutPayload {
+  playerId: string;
+  phase: CanonicalGameState["phase"];
+  reason: string;
 }
 
 export interface GameEvent<T = any> {

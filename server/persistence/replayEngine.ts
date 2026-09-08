@@ -125,6 +125,26 @@ export class ReplayEngine {
         };
       }
 
+      case "PLAYER_DISCONNECT_TIMEOUT": {
+        if (!state) throw new Error("Cannot apply PLAYER_DISCONNECT_TIMEOUT on uninitialized state.");
+        const { playerId, phase } = event.payload || {};
+        let players = state.players;
+        if (state.phase === "LOBBY" || phase === "LOBBY") {
+          players = state.players.filter((p) => p.id !== playerId);
+        } else {
+          players = state.players.map((p) =>
+            p.id === playerId ? { ...p, alive: false } : p
+          );
+        }
+        return {
+          ...state,
+          players,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
       case "GAME_STARTED": {
         if (!state) throw new Error("Cannot apply GAME_STARTED on uninitialized state.");
         return {
@@ -467,7 +487,7 @@ export class ReplayEngine {
       for (const ev of events) {
         if (ev.type === "PLAYER_DISCONNECTED") {
           lastDisconnectEvents.set(ev.payload.playerId, ev.payload);
-        } else if (ev.type === "PLAYER_RECONNECTED") {
+        } else if (ev.type === "PLAYER_RECONNECTED" || ev.type === "PLAYER_DISCONNECT_TIMEOUT") {
           lastDisconnectEvents.delete(ev.payload.playerId);
         }
       }
@@ -475,16 +495,22 @@ export class ReplayEngine {
         if (payload?.disconnectDeadline) {
           const remainingMs = payload.disconnectDeadline - Date.now();
           if (remainingMs > 0) {
-            const timer = setTimeout(() => {
+            const timer = setTimeout(async () => {
               state?.disconnectTimers.delete(playerId);
-              if (state?.phase === "LOBBY") {
-                state.players = state.players.filter((p) => p.id !== playerId);
+              try {
+                const { RoomManager } = await import("../rooms/roomManager");
+                await RoomManager.handleDisconnectTimeout(roomId, playerId);
+              } catch (err) {
+                console.error(`Error handling disconnect timeout for ${playerId}:`, err);
               }
             }, remainingMs);
             state.disconnectTimers.set(playerId, timer);
-          } else if (state.phase === "LOBBY") {
-            // Grace period already expired while server was offline
-            state.players = state.players.filter((p) => p.id !== playerId);
+          } else {
+            // Grace period already expired while server was offline: emit canonical timeout
+            try {
+              const { RoomManager } = await import("../rooms/roomManager");
+              RoomManager.handleDisconnectTimeout(roomId, playerId).catch(() => {});
+            } catch {}
           }
         }
       }

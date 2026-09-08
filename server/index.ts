@@ -7,7 +7,7 @@
 import Fastify, { FastifyInstance } from "fastify";
 import websocketPlugin from "@fastify/websocket";
 import corsPlugin from "@fastify/cors";
-import { config } from "./config";
+import { config, validateProductionSecrets } from "./config";
 import { RoomManager } from "./rooms/roomManager";
 import { FogOfWarDispatcher } from "./gateway/fogOfWarDispatcher";
 import { registerWebSocketGateway } from "./gateway/websocket";
@@ -110,15 +110,18 @@ export async function buildServer(): Promise<FastifyInstance> {
 }
 
 export async function startServer(): Promise<void> {
-  // CRITICAL PRODUCTION PERSISTENCE GATE:
-  // Running in production mode without PostgresEventStore is strictly prohibited.
-  if (process.env.NODE_ENV === "production" && !(defaultEventStore instanceof PostgresEventStore)) {
-    console.error(
-      "❌ [FATAL PERSISTENCE ERROR] NODE_ENV is set to 'production' but the active event store is NOT PostgresEventStore!\n" +
-      "ASPIRE: WEREWOLF mandates PostgreSQL persistence in production mode to guarantee historical truth and crash recovery.\n" +
-      "Process will terminate immediately."
-    );
-    process.exit(1);
+  // CRITICAL PRODUCTION PERSISTENCE & SECURITY GATES:
+  // Running in production mode without PostgresEventStore or with default secrets is strictly prohibited.
+  if (process.env.NODE_ENV === "production") {
+    validateProductionSecrets();
+    if (!(defaultEventStore instanceof PostgresEventStore)) {
+      console.error(
+        "❌ [FATAL PERSISTENCE ERROR] NODE_ENV is set to 'production' but the active event store is NOT PostgresEventStore!\n" +
+        "ASPIRE: WEREWOLF mandates PostgreSQL persistence in production mode to guarantee historical truth and crash recovery.\n" +
+        "Process will terminate immediately."
+      );
+      process.exit(1);
+    }
   }
 
   const server = await buildServer();
