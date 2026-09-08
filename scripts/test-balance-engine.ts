@@ -70,7 +70,47 @@ const neutralHeavyPool = [
 ];
 for (const pCount of [5, 6, 8]) {
   const m2Res2 = auditSelectBalancedSubsetFromPool(neutralHeavyPool, pCount);
+  const selectedNames = m2Res2.selected.map((r) => r.canonical_name);
+  const uniqueNames = new Set(selectedNames);
+  if (pCount <= neutralHeavyPool.length) {
+    if (uniqueNames.size !== selectedNames.length) {
+      throw new Error(`Mode 2 duplicate detected in pool size >= playerCount: ${selectedNames.join(", ")}`);
+    }
+  }
   console.log(
-    `Mode 2 Neutral-heavy Pool (${pCount} players) -> Selected: [${m2Res2.selected.map((r) => r.canonical_name).join(", ")}] | Score: ${m2Res2.bestScore}`
+    `Mode 2 Neutral-heavy Pool (${pCount} players) -> Selected: [${selectedNames.join(", ")}] (Unique: ${uniqueNames.size === selectedNames.length}) | Score: ${m2Res2.bestScore}`
   );
 }
+
+// Edge Case 4: Pool with fewer unique roles than players, WITHOUT Villager (must be rejected)
+const smallPoolNoVillager = [
+  { role_id: "ROLE-023", canonical_name: "Werewolf", count: 1 },
+  { role_id: "ROLE-022", canonical_name: "Seer", count: 1 },
+  { role_id: "ROLE-028", canonical_name: "Bodyguard", count: 1 },
+  { role_id: "ROLE-039", canonical_name: "Hunter", count: 1 },
+];
+const vSmall = validateMode2Pool(smallPoolNoVillager, 6);
+console.log(`Small pool without villager rejected for 6 players: ${!vSmall.valid} (Error: "${vSmall.error}")`);
+if (vSmall.valid) throw new Error("Expected small pool without villager to be rejected!");
+
+// Edge Case 5: Pool with fewer unique roles than players, WITH Villager (Villager pads, specials unique)
+const smallPoolWithVillager = [
+  { role_id: "ROLE-023", canonical_name: "Werewolf", count: 1 },
+  { role_id: "ROLE-022", canonical_name: "Seer", count: 1 },
+  { role_id: "ROLE-028", canonical_name: "Bodyguard", count: 1 },
+  { role_id: "ROLE-024", canonical_name: "Villager", count: 1 },
+];
+const vVillagerPad = validateMode2Pool(smallPoolWithVillager, 6);
+console.log(`Small pool with villager valid for 6 players: ${vVillagerPad.valid}`);
+if (!vVillagerPad.valid) throw new Error("Expected small pool with villager to be valid!");
+const m2ResPad = auditSelectBalancedSubsetFromPool(smallPoolWithVillager, 6);
+const padRoleNames = m2ResPad.selected.map((r) => r.canonical_name);
+const nonVillagers = m2ResPad.selected.filter((r) => r.canonical_name !== "Villager");
+const uniqueNonVillagers = new Set(nonVillagers.map((r) => r.role_id));
+if (uniqueNonVillagers.size !== nonVillagers.length) {
+  throw new Error(`Special role duplicated in villager-padded pool: ${padRoleNames.join(", ")}`);
+}
+console.log(
+  `Small pool with Villager padding (6 players) -> Selected: [${padRoleNames.join(", ")}] (Special roles unique: true, Villager padded: ${padRoleNames.filter(n => n === "Villager").length})`
+);
+

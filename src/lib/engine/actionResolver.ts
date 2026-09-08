@@ -305,7 +305,7 @@ export function resolveNightActions(
     const roleName = (action.role_name || actor?.canonical_name || "").toLowerCase();
 
     // Werewolves Collective Action
-    if (roleName.startsWith("werewolf") || roleName.startsWith("werewolves")) {
+    if (roleName.startsWith("werewolf") || roleName.startsWith("werewolves") || action.role_id?.startsWith("SYSTEM-WEREWOLF-PACK")) {
       // Check if wolves are skipping kill tonight (e.g. infected by Diseased)
       if (context?.wolvesSkippingTonight) {
         outcome.triggeredActions.push({
@@ -315,6 +315,40 @@ export function resolveNightActions(
           description: "Kawanan Werewolf masih sakit akibat terinfeksi Diseased dan tidak bisa menyerang malam ini.",
         });
         continue;
+      }
+
+      // Collect alive pack members
+      const alivePackMembers = action.player_ids
+        .map((id) => playerMap.get(id))
+        .filter((p) => p && p.alive);
+
+      // Fruit Brute (ROLE-062): If Fruit Brute is the sole surviving werewolf, wolves cannot eliminate a player!
+      const isOnlyFruitBrute =
+        alivePackMembers.length === 1 &&
+        (alivePackMembers[0]?.role_id === "ROLE-062" ||
+          alivePackMembers[0]?.canonical_name === "Fruit Brute");
+      if (isOnlyFruitBrute) {
+        outcome.triggeredActions.push({
+          type: "FRUIT_BRUTE_NO_KILL",
+          playerId: alivePackMembers[0]!.id,
+          roleName: "Fruit Brute",
+          description:
+            "Fruit Brute adalah werewolf terakhir yang hidup dan tidak dapat mengeliminasi pemain di malam hari.",
+        });
+        continue;
+      }
+
+      // Teenage Werewolf (ROLE-067): Emits howl during pack attack
+      const hasTeenWolf = alivePackMembers.some(
+        (p) => p?.role_id === "ROLE-067" || p?.canonical_name === "Teenage Werewolf"
+      );
+      if (hasTeenWolf) {
+        outcome.triggeredActions.push({
+          type: "TEENAGE_WOLF_HOWL",
+          playerId: alivePackMembers.find((p) => p?.role_id === "ROLE-067")?.id || "",
+          roleName: "Teenage Werewolf",
+          description: "Terdengar suara lolongan Teenage Werewolf di malam hari!",
+        });
       }
 
       let targetId = action.target_player_id;
@@ -457,7 +491,7 @@ export function resolveNightActions(
     }
 
     // Magician (ROLE-012): Choose power / act at night
-    if ((roleName.includes("magician") || action.role_id === "ROLE-012") && actor && actor.alive) {
+    if ((roleName.includes("magician") || action.role_id === "ROLE-012") && actor && actor.alive && !actor.hasUsedAbility) {
       playerMap.set(actor.id, {
         ...actor,
         hasUsedAbility: true,
@@ -471,7 +505,7 @@ export function resolveNightActions(
     }
 
     // Troublemaker (ROLE-055): Force elimination
-    if ((roleName.includes("troublemaker") || action.role_id === "ROLE-055") && actor && actor.alive) {
+    if ((roleName.includes("troublemaker") || action.role_id === "ROLE-055") && actor && actor.alive && !actor.hasUsedAbility) {
       playerMap.set(actor.id, {
         ...actor,
         hasUsedAbility: true,

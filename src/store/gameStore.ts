@@ -154,8 +154,8 @@ export const useGameStore = create<GameStore>()((set, get) => {
       const hostId = get().myPlayerId;
       const roomCode = generateRoomCode();
       const targetCount =
-        gameMode === "MODE_3_RANDOM"
-          ? (targetPlayerCount || 8)
+        gameMode === "MODE_3_RANDOM" || gameMode === "MODE_2_POOL"
+          ? (targetPlayerCount || 20)
           : selectedRoles.reduce((sum, r) => sum + r.count, 0);
 
       get().setPlayerName(hostName);

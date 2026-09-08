@@ -334,7 +334,7 @@ Below is the complete, transparent file-by-file inventory.
 1. **Replaced in Phase 3**:
    - `evaluateSeerResult()`: Now 100% database-driven via `seer_result` column (`Wolf Man` = Villager, `Lycan` = Werewolf).
    - Night Priority Ordering: Now 100% database-driven via `night_priority` column.
-   - Mode 2 & Mode 3 Balancing: Now 100% algorithmic combinatorial optimization via `role_points` and `balance_weight`.
+   - Mode 2 & Mode 3 Balancing: Algorithmic constrained heuristic balance search via `role_points` and `balance_weight` (Mode 2 samples strictly without replacement).
    - `gameEngine.ts`: Player mapping now populates 100% of metadata directly from `ROLE_BY_ID`.
 2. **Retained as Card-Specific Executable Handlers**:
    - Handlers for specific card mechanics (e.g., Cupid lovers suicide, Dr. Boom blast, Witch 2-potion tracking, Tanner vote-only win) remain as procedural handler functions dispatched by `role_id` / `canonical_name`. This is standard, robust game engine architecture.

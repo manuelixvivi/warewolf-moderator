@@ -276,9 +276,28 @@ function test_ROLE_012() {
     priority: 35,
     completed: true,
   };
-  const { updatedPlayers } = resolveNightActions([mag, target], [act], 1);
+  // Positive: Alive Magician executes night action, records MAGICIAN_CAST and marks ability used
+  const { updatedPlayers, outcome } = resolveNightActions([mag, target], [act], 1);
   const updatedMag = updatedPlayers.find((p) => p.id === "mag")!;
-  assert(updatedMag.hasUsedAbility === true, "[ROLE-012] Magician completes night selection and marks ability used");
+  assert(
+    updatedMag.hasUsedAbility === true &&
+      outcome.triggeredActions.some((t) => t.type === "MAGICIAN_CAST" && t.playerId === "mag"),
+    "[ROLE-012] Magician completes night selection and marks ability used"
+  );
+  // Negative: Dead Magician cannot trigger MAGICIAN_CAST
+  const deadMag = { ...mag, alive: false };
+  const { outcome: deadOutcome } = resolveNightActions([deadMag, target], [act], 1);
+  assert(
+    !deadOutcome.triggeredActions.some((t) => t.type === "MAGICIAN_CAST"),
+    "[ROLE-012] (Negative) Dead Magician cannot cast power"
+  );
+  // Negative: Magician who already used ability cannot cast again
+  const usedMag = { ...mag, hasUsedAbility: true };
+  const { outcome: usedOutcome } = resolveNightActions([usedMag, target], [act], 2);
+  assert(
+    !usedOutcome.triggeredActions.some((t) => t.type === "MAGICIAN_CAST"),
+    "[ROLE-012] (Negative) Magician cannot reuse power after already casting"
+  );
 }
 
 // ------------------------------------------------------------
@@ -358,10 +377,13 @@ function test_ROLE_017() {
 function test_ROLE_019() {
   const tb = createPlayer("tb", "Time Bandit", "ROLE-019");
   const v1 = createPlayer("v1", "Villager 1", "ROLE-024");
-  const { outcome } = resolveDayVotes([tb, v1], { tb: "v1", v1: "tb" });
-  assert(outcome.tally["v1"] === 1, "[ROLE-019] Time Bandit casts vote in daytime resolution");
-  const win = evaluateWinConditions([tb, v1]);
-  assert(win.winner !== null, "[ROLE-019] Time Bandit survives to game evaluation");
+  const v2 = createPlayer("v2", "Villager 2", "ROLE-024");
+  // Positive: When Time Bandit is eliminated by daytime vote, day timer is reduced to 1 minute
+  const { outcome: outElim } = resolveDayVotes([tb, v1, v2], { tb: "v1", v1: "tb", v2: "tb" });
+  assert(outElim.dayTimerReduced === true, "[ROLE-019] Time Bandit elimination reduces day timer");
+  // Negative: When another player is eliminated, day timer is NOT reduced
+  const { outcome: outOther } = resolveDayVotes([tb, v1, v2], { tb: "v1", v1: "v1", v2: "v1" });
+  assert(outOther.dayTimerReduced === false, "[ROLE-019] (Negative) Non-Time Bandit elimination does not reduce day timer");
 }
 
 // ------------------------------------------------------------
@@ -941,9 +963,28 @@ function test_ROLE_055() {
     priority: 70,
     completed: true,
   };
-  const { updatedPlayers } = resolveNightActions([tm, target], [act], 1);
+  // Positive: Troublemaker alive triggers TROUBLEMAKER_DISRUPT and marks ability used
+  const { updatedPlayers, outcome } = resolveNightActions([tm, target], [act], 1);
   const updatedTm = updatedPlayers.find((p) => p.id === "tm")!;
-  assert(updatedTm.hasUsedAbility === true, "[ROLE-055] Troublemaker expends once-per-game ability to disrupt village");
+  assert(
+    updatedTm.hasUsedAbility === true &&
+      outcome.triggeredActions.some((t) => t.type === "TROUBLEMAKER_DISRUPT" && t.playerId === "tm"),
+    "[ROLE-055] Troublemaker expends once-per-game ability to disrupt village"
+  );
+  // Negative: Dead Troublemaker cannot trigger disruption
+  const deadTm = { ...tm, alive: false };
+  const { outcome: deadOutcome } = resolveNightActions([deadTm, target], [act], 1);
+  assert(
+    !deadOutcome.triggeredActions.some((t) => t.type === "TROUBLEMAKER_DISRUPT"),
+    "[ROLE-055] (Negative) Dead Troublemaker cannot disrupt village"
+  );
+  // Negative: Troublemaker who already used ability cannot disrupt again
+  const usedTm = { ...tm, hasUsedAbility: true };
+  const { outcome: usedOutcome } = resolveNightActions([usedTm, target], [act], 2);
+  assert(
+    !usedOutcome.triggeredActions.some((t) => t.type === "TROUBLEMAKER_DISRUPT"),
+    "[ROLE-055] (Negative) Troublemaker cannot reuse ability once expended"
+  );
 }
 
 // ------------------------------------------------------------
@@ -1046,12 +1087,37 @@ function test_ROLE_060() {
 // ------------------------------------------------------------
 function test_ROLE_061() {
   const ff = createPlayer("ff", "Fang Face", "ROLE-061");
+  const ww = createPlayer("ww", "Werewolf", "ROLE-023");
   const target = createPlayer("t", "Target", "ROLE-024");
-  const wolfActions = buildEngineNightActions([ff, target], 1);
-  const packAction = wolfActions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
-  assert(Boolean(packAction && packAction.player_ids.includes("ff")), "[ROLE-061] Fang Face is included in werewolf pack attack");
-  const attackAct = { ...packAction!, target_player_id: "t", completed: true };
-  const { updatedPlayers } = resolveNightActions([ff, target], [attackAct], 1);
+
+  // Rule: On Night 1, Fang Face wakes with the pack
+  const night1Actions = buildEngineNightActions([ff, ww, target], 1);
+  const packN1 = night1Actions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
+  assert(
+    Boolean(packN1 && packN1.player_ids.includes("ff") && packN1.player_ids.includes("ww")),
+    "[ROLE-061] Fang Face is included in werewolf pack attack on Night 1"
+  );
+
+  // Rule (Negative): On Night 2+, while other Werewolves live, Fang Face does NOT wake with the pack
+  const night2ActionsOtherLive = buildEngineNightActions([ff, ww, target], 2);
+  const packN2OtherLive = night2ActionsOtherLive.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
+  assert(
+    Boolean(packN2OtherLive && !packN2OtherLive.player_ids.includes("ff") && packN2OtherLive.player_ids.includes("ww")),
+    "[ROLE-061] (Negative) Fang Face does not wake with pack on Night 2+ while other Werewolves are alive"
+  );
+
+  // Rule: On Night 2+, if other Werewolves are dead (Fang Face is sole wolf), Fang Face wakes with the pack
+  const deadWw = { ...ww, alive: false };
+  const night2ActionsSoleWolf = buildEngineNightActions([ff, deadWw, target], 2);
+  const packN2Sole = night2ActionsSoleWolf.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
+  assert(
+    Boolean(packN2Sole && packN2Sole.player_ids.includes("ff")),
+    "[ROLE-061] Fang Face wakes with pack on Night 2+ when sole surviving Werewolf"
+  );
+
+  // Resolution: Fang Face attack eliminates victim
+  const attackAct = { ...packN1!, target_player_id: "t", completed: true };
+  const { updatedPlayers } = resolveNightActions([ff, ww, target], [attackAct], 1);
   assert(!updatedPlayers.find((p) => p.id === "t")?.alive, "[ROLE-061] Fang Face pack attack eliminates victim");
 }
 
@@ -1060,11 +1126,37 @@ function test_ROLE_061() {
 // ------------------------------------------------------------
 function test_ROLE_062() {
   const fb = createPlayer("fb", "Fruit Brute", "ROLE-062");
+  const ww = createPlayer("ww", "Werewolf", "ROLE-023");
   const bg = createPlayer("bg", "Bodyguard", "ROLE-028");
   const target = createPlayer("t", "Target", "ROLE-024");
-  const wolfActions = buildEngineNightActions([fb, bg, target], 1);
+
+  // Pack with Fruit Brute and regular Werewolf: attacks and eliminates victim
+  const wolfActions = buildEngineNightActions([fb, ww, target], 1);
   const packAction = wolfActions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
   assert(Boolean(packAction && packAction.player_ids.includes("fb")), "[ROLE-062] Fruit Brute participates in werewolf pack kill");
+  const attackAct = { ...packAction!, target_player_id: "t", completed: true };
+  const { updatedPlayers: resMulti } = resolveNightActions([fb, ww, target], [attackAct], 1);
+  assert(!resMulti.find((p) => p.id === "t")?.alive, "[ROLE-062] Fruit Brute with pack eliminates victim");
+
+  // Rule (Negative): If Fruit Brute is the LAST Werewolf in the game, cannot eliminate at night!
+  const soloAttackAct: EngineNightAction = {
+    id: "fb-solo",
+    role_id: "SYSTEM-WEREWOLF-PACK",
+    role_name: "Werewolves",
+    player_ids: ["fb"],
+    action_type: "Werewolf Action",
+    target_player_id: "t",
+    priority: 50,
+    completed: true,
+  };
+  const { updatedPlayers: resSolo, outcome: soloOutcome } = resolveNightActions([fb, target], [soloAttackAct], 2);
+  assert(
+    resSolo.find((p) => p.id === "t")?.alive === true &&
+      soloOutcome.triggeredActions.some((t) => t.type === "FRUIT_BRUTE_NO_KILL"),
+    "[ROLE-062] (Negative) Fruit Brute cannot eliminate a player when sole surviving Werewolf"
+  );
+
+  // Negative: Protected target survives Fruit Brute attack
   const protectAct: EngineNightAction = {
     id: "bg-1",
     role_id: "ROLE-028",
@@ -1075,9 +1167,8 @@ function test_ROLE_062() {
     priority: 30,
     completed: true,
   };
-  const attackAct = { ...packAction!, target_player_id: "t", completed: true };
-  const { updatedPlayers } = resolveNightActions([fb, bg, target], [protectAct, attackAct], 1);
-  assert(updatedPlayers.find((p) => p.id === "t")?.alive === true, "[ROLE-062] (Negative) Protected target survives Fruit Brute attack");
+  const { updatedPlayers: resProt } = resolveNightActions([fb, ww, bg, target], [protectAct, attackAct], 1);
+  assert(resProt.find((p) => p.id === "t")?.alive === true, "[ROLE-062] (Negative) Protected target survives Fruit Brute attack");
 }
 
 // ------------------------------------------------------------
@@ -1167,13 +1258,28 @@ function test_ROLE_066() {
 // ------------------------------------------------------------
 function test_ROLE_067() {
   const teen = createPlayer("teen", "Teenage Werewolf", "ROLE-067");
+  const ww = createPlayer("ww", "Werewolf", "ROLE-023");
   const target = createPlayer("t", "Target", "ROLE-024");
-  const wolfActions = buildEngineNightActions([teen, target], 1);
+
+  // Positive: Teenage Werewolf participates in pack kill and triggers howl
+  const wolfActions = buildEngineNightActions([teen, ww, target], 1);
   const packAction = wolfActions.find((a) => a.role_id === "SYSTEM-WEREWOLF-PACK");
   assert(Boolean(packAction && packAction.player_ids.includes("teen")), "[ROLE-067] Teenage Werewolf is mobilized with werewolf pack");
   const attackAct = { ...packAction!, target_player_id: "t", completed: true };
-  const { updatedPlayers } = resolveNightActions([teen, target], [attackAct], 1);
+  const { updatedPlayers, outcome } = resolveNightActions([teen, ww, target], [attackAct], 1);
   assert(!updatedPlayers.find((p) => p.id === "t")?.alive, "[ROLE-067] Teenage Werewolf pack attack successfully eliminates victim");
+  assert(
+    outcome.triggeredActions.some((t) => t.type === "TEENAGE_WOLF_HOWL"),
+    "[ROLE-067] Teenage Werewolf emits howl during night pack action"
+  );
+
+  // Negative: Pack without Teenage Werewolf does not trigger howl
+  const regularWolfAct = { ...packAction!, player_ids: ["ww"] };
+  const { outcome: outReg } = resolveNightActions([ww, target], [regularWolfAct], 1);
+  assert(
+    !outReg.triggeredActions.some((t) => t.type === "TEENAGE_WOLF_HOWL"),
+    "[ROLE-067] (Negative) Pack without Teenage Werewolf does not trigger howl"
+  );
 }
 
 // ------------------------------------------------------------

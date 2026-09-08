@@ -138,7 +138,28 @@ export function buildEngineNightActions(
       roleDef?.category === "Werewolf" ||
       roleDef?.team === "Werewolf";
     const actionType = p.action_type || roleDef?.action_type || "";
-    return isWolfTeam && actionType !== "Find Seer" && actionType !== "Support Werewolves";
+    if (!isWolfTeam || actionType === "Find Seer" || actionType === "Support Werewolves") {
+      return false;
+    }
+
+    // Fang Face (ROLE-061): Wakes with pack on Night 1; on subsequent nights, only wakes if sole surviving werewolf
+    if (p.role_id === "ROLE-061" || roleDef?.canonical_name === "Fang Face") {
+      if (nightCount > 1) {
+        const otherAliveWolves = alivePlayers.some(
+          (other) =>
+            other.id !== p.id &&
+            (other.team === "Werewolf" ||
+              other.team === "Solo Werewolf" ||
+              ROLE_BY_ID.get(other.role_id)?.category === "Werewolf" ||
+              ROLE_BY_ID.get(other.role_id)?.team === "Werewolf") &&
+            (other.action_type || ROLE_BY_ID.get(other.role_id)?.action_type) !== "Find Seer" &&
+            (other.action_type || ROLE_BY_ID.get(other.role_id)?.action_type) !== "Support Werewolves"
+        );
+        if (otherAliveWolves) return false;
+      }
+    }
+
+    return true;
   });
 
   if (aliveWerewolves.length > 0) {

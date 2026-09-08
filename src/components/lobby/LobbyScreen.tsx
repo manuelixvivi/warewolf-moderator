@@ -31,14 +31,21 @@ export default function LobbyScreen() {
     );
   });
 
+  const poolCount = room?.selectedRoles?.length || 0;
+  const poolHasVillager = (room?.selectedRoles || []).some(
+    (r) => r.canonical_name === "Villager" || r.role_id === "ROLE-024"
+  );
+  const poolHasEnoughRoles =
+    gameMode !== "MODE_2_POOL" || poolCount >= joinedCount || poolHasVillager;
+
   // Mode 1 requires exact count match.
-  // Mode 2 requires at least 5 players AND at least 1 wolf in pool.
+  // Mode 2 requires at least 5 players, at least 1 wolf in pool, and enough roles in pool (or Villager).
   // Mode 3 requires at least 5 players.
   const canStart =
     gameMode === "MODE_1_FIXED"
       ? isExactFull && hasMinPlayers
       : gameMode === "MODE_2_POOL"
-      ? hasMinPlayers && poolHasWolf
+      ? hasMinPlayers && poolHasWolf && poolHasEnoughRoles
       : hasMinPlayers;
 
   const handleCopyCode = () => {
@@ -266,6 +273,8 @@ export default function LobbyScreen() {
                     ? `Menunggu Minimal 5 Pemain (${joinedCount}/5)`
                     : gameMode === "MODE_2_POOL" && !poolHasWolf
                     ? "Pool Wajib Memiliki Peran Serigala!"
+                    : gameMode === "MODE_2_POOL" && !poolHasEnoughRoles
+                    ? `Pool Kurang Peran (${poolCount}/${joinedCount})`
                     : `Menunggu Room Penuh (${joinedCount}/${targetCount})`}
                 </span>
               </button>
@@ -276,6 +285,8 @@ export default function LobbyScreen() {
                     ? "⚠️ Game ASPIRE: WEREWOLF memerlukan minimal 5 pemain untuk menjaga keseimbangan permainan."
                     : gameMode === "MODE_2_POOL" && !poolHasWolf
                     ? "⚠️ Role pool tidak memiliki peran di pihak Werewolf. Host tidak dapat memulai game tanpa serigala!"
+                    : gameMode === "MODE_2_POOL" && !poolHasEnoughRoles
+                    ? `⚠️ Role pool hanya berisi ${poolCount} peran unik untuk ${joinedCount} pemain. Tambahkan peran ke pool atau sertakan Villager!`
                     : `⚠️ Mode 1 memerlukan semua ${targetCount} kursi terisi sebelum bisa dimulai.`}
                 </p>
               )}
