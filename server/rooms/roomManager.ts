@@ -31,9 +31,10 @@ import {
   MINIMUM_PLAYERS,
 } from "../../src/lib/engine/balanceEngine";
 import { SelectedRole } from "../../src/types/game";
+import { defaultEventStore, ReplayEngine } from "../persistence";
 
 export class RoomManager {
-  private static rooms = new Map<string, AuthoritativeRoomState>();
+  public static rooms = new Map<string, AuthoritativeRoomState>();
 
   public static getRoom(roomId: string): AuthoritativeRoomState | undefined {
     return this.rooms.get(roomId);
@@ -41,6 +42,17 @@ export class RoomManager {
 
   public static getAllRooms(): AuthoritativeRoomState[] {
     return Array.from(this.rooms.values());
+  }
+
+  /**
+   * Recovers room state from the canonical EventStore after crash or eviction.
+   */
+  public static async recoverRoom(roomId: string): Promise<AuthoritativeRoomState | null> {
+    const recovered = await ReplayEngine.reconstructState(roomId, defaultEventStore);
+    if (recovered) {
+      this.rooms.set(roomId, recovered);
+    }
+    return recovered;
   }
 
   /**
@@ -69,6 +81,11 @@ export class RoomManager {
 
     room.eventLog.push(event);
     room.updatedAt = Date.now();
+
+    defaultEventStore.appendEvent(event).catch(() => {
+      // Event persistence error logged
+    });
+
     return event;
   }
 
@@ -128,6 +145,14 @@ export class RoomManager {
     };
 
     this.rooms.set(roomId, room);
+
+    defaultEventStore.saveMatch({
+      roomId,
+      gameMode,
+      hostPlayerId,
+      hostPlayerName,
+      status: "ACTIVE",
+    }).catch(() => {});
 
     this.appendEvent(room, "ROOM_INITIALIZED", hostPlayerId, {
       roomId,
@@ -303,6 +328,7 @@ export class RoomManager {
 
     this.appendEvent(room, "ROLES_ASSIGNED", hostPlayerId, {
       assignedCount: playerCount,
+      assignments: room.players.map((p) => ({ playerId: p.id, role_id: p.role_id })),
     });
 
     this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
