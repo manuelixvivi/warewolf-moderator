@@ -11,6 +11,10 @@
 // ⑥ Total Crash Recovery & Continuation (Memory wiped, restored from store, match finished)
 // ⑦ Cryptographic Tamper Verification (HMAC-SHA256 signature auditing)
 // ⑧ Golden Engine Regression (SOURCE 6 Engine Output == PostgreSQL Replay Output)
+// ⑨ Real PostgreSQL Driver & Constraints Integration
+// ⑩ Atomic Room Creation & Rollback Guarantee
+// ⑪ Per-Room Concurrent Command Serialization (FIFO Mutex)
+// ⑫ Transactional Command Idempotency & Duplicate Rejection
 //
 // Note: Core Event Sourcing contracts verified using InMemoryEventStore;
 // PostgreSQL driver tested with identical schema and constraints.
@@ -975,13 +979,213 @@ async function runPhase4VerificationSuite() {
       console.log("  ✅ [PASS] [Req 9] Real PostgreSQL integration test passed 100%!");
       passCount++;
     } catch (pgErr: any) {
+      if (process.env.CI_PHASE4 === "production" || process.env.NODE_ENV === "production") {
+        console.error("  ❌ [FATAL] [Req 9] PostgreSQL integration failed under production test gate:", pgErr.message);
+        throw pgErr;
+      }
       console.warn("  ⚠️ [WARN] [Req 9] Real PostgreSQL instance connection skipped:", pgErr.message);
     }
   }
 
   // ------------------------------------------------------------
-  // SUMMARY
+  // 10. REQUIREMENT ⑩: ATOMIC ROOM CREATION & ROLLBACK GUARANTEE
   // ------------------------------------------------------------
+  console.log("\n--- 10. REQUIREMENT ⑩: ATOMIC ROOM CREATION & ROLLBACK GUARANTEE ---");
+  {
+    const atomicRoomId = `ROOM-ATOMIC-${Date.now()}`;
+    const initEvent: GameEvent = {
+      eventId: "018d34bf-4299-7000-8000-000000000010",
+      roomId: atomicRoomId,
+      sequence: 1,
+      timestamp: Date.now(),
+      type: "ROOM_INITIALIZED",
+      actorId: "host-1",
+      payload: { roomId: atomicRoomId, hostPlayerId: "host-1", hostPlayerName: "Host" },
+      serverSignature: signGameEvent(atomicRoomId, 1, "ROOM_INITIALIZED", {
+        roomId: atomicRoomId,
+        hostPlayerId: "host-1",
+        hostPlayerName: "Host",
+      }),
+    };
+
+    // Test with defaultEventStore (either PG or InMemory)
+    await defaultEventStore.createRoomAtomic(
+      {
+        roomId: atomicRoomId,
+        gameMode: "MODE_1_FIXED",
+        hostPlayerId: "host-1",
+        hostPlayerName: "Host",
+        status: "ACTIVE",
+      },
+      {
+        roomId: atomicRoomId,
+        playerId: "host-1",
+        playerName: "Host",
+        isHost: true,
+        roleId: "ROLE-024",
+        canonicalName: "Villager",
+        team: "Village",
+        alive: true,
+      },
+      initEvent
+    );
+
+    const hasMatch = await defaultEventStore.hasMatch(atomicRoomId);
+    assert(hasMatch === true, "[Req 10] createRoomAtomic created match projection");
+
+    const events = await defaultEventStore.getEvents(atomicRoomId);
+    assert(events.length === 1, "[Req 10] createRoomAtomic appended initial event");
+    assert(events[0].sequence === 1, "[Req 10] Initial event sequence is strictly 1");
+
+    if (defaultEventStore.clearRoom) {
+      await defaultEventStore.clearRoom(atomicRoomId);
+    }
+    console.log("  ✅ [PASS] [Req 10] Atomic room creation test passed 100%!");
+  }
+
+  // ------------------------------------------------------------
+  // 11. REQUIREMENT ⑪: PER-ROOM CONCURRENT COMMAND SERIALIZATION
+  // ------------------------------------------------------------
+  console.log("\n--- 11. REQUIREMENT ⑪: PER-ROOM CONCURRENT COMMAND SERIALIZATION (FIFO MUTEX) ---");
+  {
+    const concurrentRoomId = `ROOM-CONCUR-${Date.now()}`;
+    const { room } = await RoomManager.createRoom(
+      "host-concurrent",
+      "HostConcurrent",
+      "MODE_1_FIXED",
+      concurrentRoomId
+    );
+
+    assert(room.sequenceNumber === 1, "[Req 11] Initial room created at sequence 1");
+
+    // Launch 10 simultaneous concurrent append operations on the exact same room
+    const concurrentOps = Array.from({ length: 10 }, (_, i) => {
+      const idx = i + 1;
+      return RoomManager.enqueueRoomOperation(concurrentRoomId, async () => {
+        return RoomManager.appendEvent(
+          room,
+          "PLAYER_JOINED",
+          `player-${idx}`,
+          { playerId: `player-${idx}`, playerName: `Player ${idx}` }
+        );
+      });
+    });
+
+    const results = await Promise.all(concurrentOps);
+    assert(results.length === 10, "[Req 11] All 10 concurrent operations resolved successfully");
+
+    // Verify room sequence in RAM is strictly 11 (1 initial + 10 concurrent)
+    assert(room.sequenceNumber === 11, `[Req 11] Room sequence monotonically reached 11 (got ${room.sequenceNumber})`);
+
+    // Verify sequences of all 10 operations are contiguous with zero duplicates
+    const sequences = results.map((r) => r.sequence).sort((a, b) => a - b);
+    const expectedSequences = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    const isContiguous = sequences.every((seq, idx) => seq === expectedSequences[idx]);
+    assert(isContiguous === true, `[Req 11] Sequences are strictly contiguous [2..11]: ${sequences.join(",")}`);
+
+    // Verify event log in store matches contiguous ordering
+    const storedEvents = await defaultEventStore.getEvents(concurrentRoomId);
+    assert(storedEvents.length === 11, "[Req 11] Stored event log contains exactly 11 events");
+    const storedSeqs = storedEvents.map((e) => e.sequence);
+    const storedContiguous = storedSeqs.every((seq, idx) => seq === idx + 1);
+    assert(storedContiguous === true, "[Req 11] Stored event sequences strictly contiguous [1..11]");
+
+    // Verify re-entrancy does not deadlock: nested enqueueRoomOperation on same room
+    const nestedResult = await RoomManager.enqueueRoomOperation(concurrentRoomId, async () => {
+      return RoomManager.enqueueRoomOperation(concurrentRoomId, async () => {
+        return "reentrant-success";
+      });
+    });
+    assert(nestedResult === "reentrant-success", "[Req 11] Re-entrant enqueueRoomOperation executes without deadlock");
+
+    // Verify cross-room concurrency: operations on different rooms execute in parallel
+    const roomA = `ROOM-CONCUR-A-${Date.now()}`;
+    const roomB = `ROOM-CONCUR-B-${Date.now()}`;
+    await RoomManager.createRoom("h-a", "HostA", "MODE_1_FIXED", roomA);
+    await RoomManager.createRoom("h-b", "HostB", "MODE_1_FIXED", roomB);
+
+    const crossResults = await Promise.all([
+      RoomManager.enqueueRoomOperation(roomA, async () => "result-A"),
+      RoomManager.enqueueRoomOperation(roomB, async () => "result-B"),
+    ]);
+    assert(crossResults[0] === "result-A" && crossResults[1] === "result-B", "[Req 11] Multi-room parallel operations execute independently");
+
+    // Clean up
+    if (defaultEventStore.clearRoom) {
+      await defaultEventStore.clearRoom(concurrentRoomId);
+      await defaultEventStore.clearRoom(roomA);
+      await defaultEventStore.clearRoom(roomB);
+    }
+    RoomManager.rooms.delete(concurrentRoomId);
+    RoomManager.rooms.delete(roomA);
+    RoomManager.rooms.delete(roomB);
+
+    console.log("  ✅ [PASS] [Req 11] Per-room command serialization test passed 100%!");
+  }
+
+  // ------------------------------------------------------------
+  // 12. REQUIREMENT ⑫: TRANSACTIONAL COMMAND IDEMPOTENCY
+  // ------------------------------------------------------------
+  console.log("\n--- 12. REQUIREMENT ⑫: TRANSACTIONAL COMMAND IDEMPOTENCY & DUPLICATE REJECTION ---");
+  {
+    const idemRoomId = `ROOM-TX-IDEM-${Date.now()}`;
+    await defaultEventStore.saveMatch({
+      roomId: idemRoomId,
+      gameMode: "MODE_1_FIXED",
+      hostPlayerId: "p1",
+      hostPlayerName: "Alice",
+    });
+
+    const cmdId = `CMD-TX-${Date.now()}`;
+    const testEvent: GameEvent = {
+      eventId: "018d34bf-4299-7000-8000-000000000020",
+      roomId: idemRoomId,
+      sequence: 1,
+      timestamp: Date.now(),
+      type: "ROOM_INITIALIZED",
+      actorId: "p1",
+      payload: { roomId: idemRoomId },
+      serverSignature: signGameEvent(idemRoomId, 1, "ROOM_INITIALIZED", { roomId: idemRoomId }),
+    };
+
+    // First append with command: must succeed with isDuplicate = false
+    const firstRes = await defaultEventStore.appendEventWithCommand(testEvent, {
+      commandId: cmdId,
+      roomId: idemRoomId,
+      senderId: "p1",
+      commandType: "INITIALIZE_ROOM",
+    });
+    assert(firstRes.isDuplicate === false, "[Req 12] First command execution reported isDuplicate: false");
+
+    // Second append with SAME command: must report isDuplicate = true and NOT insert duplicate event
+    const dupEvent: GameEvent = {
+      eventId: "018d34bf-4299-7000-8000-000000000021",
+      roomId: idemRoomId,
+      sequence: 2,
+      timestamp: Date.now() + 1,
+      type: "ROOM_INITIALIZED",
+      actorId: "p1",
+      payload: { roomId: idemRoomId },
+      serverSignature: signGameEvent(idemRoomId, 2, "ROOM_INITIALIZED", { roomId: idemRoomId }),
+    };
+
+    const dupRes = await defaultEventStore.appendEventWithCommand(dupEvent, {
+      commandId: cmdId,
+      roomId: idemRoomId,
+      senderId: "p1",
+      commandType: "INITIALIZE_ROOM",
+    });
+    assert(dupRes.isDuplicate === true, "[Req 12] Duplicate command execution reported isDuplicate: true");
+
+    // Verify only 1 event was persisted in event store
+    const storedEvents = await defaultEventStore.getEvents(idemRoomId);
+    assert(storedEvents.length === 1, "[Req 12] Event store contains strictly 1 event after duplicate rejection");
+
+    if (defaultEventStore.clearRoom) {
+      await defaultEventStore.clearRoom(idemRoomId);
+    }
+    console.log("  ✅ [PASS] [Req 12] Transactional idempotency test passed 100%!");
+  }
   console.log("\n============================================================");
   console.log(`ALL PHASE 4 CRITERIA AUDITED: ${passCount} PASSED / ${failCount} FAILED`);
   console.log("============================================================");

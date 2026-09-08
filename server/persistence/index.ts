@@ -6,6 +6,7 @@
 export {
   type IEventStore,
   type MatchRecord,
+  type CommandRecord,
   PostgresEventStore,
   InMemoryEventStore,
   defaultEventStore,

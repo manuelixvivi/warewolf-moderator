@@ -5,6 +5,7 @@
 //  PostgreSQL = Canonical Historical Truth. State = Projection(Event[1..N])."
 // ============================================================
 
+import { AsyncLocalStorage } from "async_hooks";
 import { v7 as uuidv7 } from "uuid";
 import {
   AuthoritativeRoomState,
@@ -32,10 +33,65 @@ import {
   MINIMUM_PLAYERS,
 } from "../../src/lib/engine/balanceEngine";
 import { SelectedRole } from "../../src/types/game";
-import { defaultEventStore, ReplayEngine } from "../persistence";
+import { defaultEventStore, ReplayEngine, CommandRecord } from "../persistence";
 
 export class RoomManager {
   public static rooms = new Map<string, AuthoritativeRoomState>();
+  private static roomQueueStorage = new AsyncLocalStorage<Set<string>>();
+  private static roomQueues = new Map<string, Promise<any>>();
+
+  /**
+   * Serializes operations per room using a strict FIFO promise chain.
+   * Ensures contiguous sequence allocation and zero concurrent sequence collisions in database.
+   * Deadlock-free: detects re-entrancy via AsyncLocalStorage and allows nested execution.
+   */
+  public static async enqueueRoomOperation<T>(
+    roomId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const activeRooms = this.roomQueueStorage.getStore();
+    if (activeRooms && activeRooms.has(roomId)) {
+      // Re-entrant call from within the same room's enqueued context: execute immediately
+      return await operation();
+    }
+
+    const currentQueue = this.roomQueues.get(roomId) || Promise.resolve();
+
+    let result: T;
+    let operationError: any = null;
+    let didFail = false;
+
+    const nextQueue = currentQueue
+      .then(async () => {
+        const nextSet = new Set(activeRooms || []);
+        nextSet.add(roomId);
+        await this.roomQueueStorage.run(nextSet, async () => {
+          try {
+            result = await operation();
+          } catch (err) {
+            operationError = err;
+            didFail = true;
+          }
+        });
+      })
+      .catch(() => {
+        // Prevent prior failure from breaking future queue chain
+      });
+
+    this.roomQueues.set(roomId, nextQueue);
+
+    await nextQueue;
+
+    // Clean up queue entry if this is the end of the chain
+    if (this.roomQueues.get(roomId) === nextQueue) {
+      this.roomQueues.delete(roomId);
+    }
+
+    if (didFail) {
+      throw operationError;
+    }
+    return result!;
+  }
 
   public static getRoom(roomId: string): AuthoritativeRoomState | undefined {
     return this.rooms.get(roomId);
@@ -66,7 +122,8 @@ export class RoomManager {
     room: AuthoritativeRoomState,
     type: GameEventType,
     actorId: string | undefined,
-    payload: T
+    payload: T,
+    commandContext?: CommandRecord
   ): Promise<GameEvent<T>> {
     const candidateSequence = room.sequenceNumber + 1;
     const signature = signGameEvent(room.roomId, candidateSequence, type, payload);
@@ -83,7 +140,16 @@ export class RoomManager {
     };
 
     // 1. AWAIT database append first (strict historical truth before RAM commit)
-    await defaultEventStore.appendEvent(event);
+    if (commandContext) {
+      const { isDuplicate } = await defaultEventStore.appendEventWithCommand(event, commandContext);
+      if (isDuplicate) {
+        return event;
+      }
+      if (!room.processedCommandIds) room.processedCommandIds = new Set();
+      room.processedCommandIds.add(commandContext.commandId);
+    } else {
+      await defaultEventStore.appendEvent(event);
+    }
 
     // 2. Only upon successful persistence commit, update authoritative state in RAM
     room.sequenceNumber = candidateSequence;
@@ -100,7 +166,8 @@ export class RoomManager {
    */
   public static async appendBatch(
     room: AuthoritativeRoomState,
-    eventsToCommit: Array<{ type: GameEventType; actorId?: string; payload: any }>
+    eventsToCommit: Array<{ type: GameEventType; actorId?: string; payload: any }>,
+    commandContext?: CommandRecord
   ): Promise<GameEvent[]> {
     if (eventsToCommit.length === 0) return [];
 
@@ -120,7 +187,16 @@ export class RoomManager {
     });
 
     // 1. AWAIT atomic batch persistence (transactional BEGIN ... COMMIT)
-    await defaultEventStore.appendBatch(preparedEvents);
+    if (commandContext) {
+      const { isDuplicate } = await defaultEventStore.appendBatchWithCommand(preparedEvents, commandContext);
+      if (isDuplicate) {
+        return preparedEvents;
+      }
+      if (!room.processedCommandIds) room.processedCommandIds = new Set();
+      room.processedCommandIds.add(commandContext.commandId);
+    } else {
+      await defaultEventStore.appendBatch(preparedEvents);
+    }
 
     // 2. Commit to RAM state only after database transaction succeeds
     room.sequenceNumber = currentSeq;
@@ -168,28 +244,6 @@ export class RoomManager {
       hasUsedAbility: false,
     };
 
-    // 1. Persist to database FIRST
-    await defaultEventStore.saveMatch({
-      roomId,
-      gameMode,
-      hostPlayerId,
-      hostPlayerName,
-      status: "ACTIVE",
-    });
-
-    if (defaultEventStore.saveParticipant) {
-      await defaultEventStore.saveParticipant({
-        roomId,
-        playerId: hostPlayerId,
-        playerName: hostPlayerName,
-        isHost: true,
-        roleId: hostPlayer.role_id,
-        canonicalName: hostPlayer.canonical_name,
-        team: hostPlayer.team,
-        alive: true,
-      });
-    }
-
     const initEventPayload = {
       roomId,
       gameMode,
@@ -208,7 +262,28 @@ export class RoomManager {
       serverSignature: initEventSignature,
     };
 
-    await defaultEventStore.appendEvent(initEvent);
+    // 1. ATOMIC ROOM CREATION: Match projection + Host participant + ROOM_INITIALIZED event
+    // All committed in a single atomic database transaction (BEGIN ... COMMIT).
+    await defaultEventStore.createRoomAtomic(
+      {
+        roomId,
+        gameMode,
+        hostPlayerId,
+        hostPlayerName,
+        status: "ACTIVE",
+      },
+      {
+        roomId,
+        playerId: hostPlayerId,
+        playerName: hostPlayerName,
+        isHost: true,
+        roleId: hostPlayer.role_id,
+        canonicalName: hostPlayer.canonical_name,
+        team: hostPlayer.team,
+        alive: true,
+      },
+      initEvent
+    );
 
     // 2. ONLY upon successful database persistence commit, register in-memory room
     const room: AuthoritativeRoomState = {
@@ -251,74 +326,76 @@ export class RoomManager {
     playerId: string,
     playerName: string
   ): Promise<{ room: AuthoritativeRoomState; sessionToken: string }> {
-    const room = this.rooms.get(roomId);
-    if (!room) {
-      throw new Error(`Room ${roomId} not found.`);
-    }
-
-    if (room.phase !== "LOBBY") {
-      throw new Error(`Cannot join room ${roomId}; game is already in phase ${room.phase}.`);
-    }
-
-    let existingPlayer = room.players.find((p) => p.id === playerId);
-    if (!existingPlayer) {
-      const candidatePlayer: PlayerEngineState = {
-        id: playerId,
-        name: playerName,
-        isHost: false,
-        isReady: false,
-        alive: true,
-        role_id: "ROLE-024",
-        canonical_name: "Villager",
-        team: "Village",
-        originalTeam: "Village",
-        category: "Village",
-        seer_result: "Villager",
-        role_points: 1,
-        balance_weight: 1,
-        night_priority: 99,
-        active_phase: "Day",
-        action_type: "None",
-        trigger: "None",
-        target_type: "None",
-        protected: false,
-        silenced: false,
-        inCult: false,
-        hasUsedAbility: false,
-      };
-
-      if (defaultEventStore.saveParticipant) {
-        await defaultEventStore.saveParticipant({
-          roomId,
-          playerId,
-          playerName,
-          isHost: false,
-          roleId: candidatePlayer.role_id,
-          canonicalName: candidatePlayer.canonical_name,
-          team: candidatePlayer.team,
-          alive: true,
-        });
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) {
+        throw new Error(`Room ${roomId} not found.`);
       }
 
-      // Await database persistence BEFORE mutating room.players array in RAM
-      await this.appendEvent(room, "PLAYER_JOINED", playerId, {
+      if (room.phase !== "LOBBY") {
+        throw new Error(`Cannot join room ${roomId}; game is already in phase ${room.phase}.`);
+      }
+
+      let existingPlayer = room.players.find((p) => p.id === playerId);
+      if (!existingPlayer) {
+        const candidatePlayer: PlayerEngineState = {
+          id: playerId,
+          name: playerName,
+          isHost: false,
+          isReady: false,
+          alive: true,
+          role_id: "ROLE-024",
+          canonical_name: "Villager",
+          team: "Village",
+          originalTeam: "Village",
+          category: "Village",
+          seer_result: "Villager",
+          role_points: 1,
+          balance_weight: 1,
+          night_priority: 99,
+          active_phase: "Day",
+          action_type: "None",
+          trigger: "None",
+          target_type: "None",
+          protected: false,
+          silenced: false,
+          inCult: false,
+          hasUsedAbility: false,
+        };
+
+        if (defaultEventStore.saveParticipant) {
+          await defaultEventStore.saveParticipant({
+            roomId,
+            playerId,
+            playerName,
+            isHost: false,
+            roleId: candidatePlayer.role_id,
+            canonicalName: candidatePlayer.canonical_name,
+            team: candidatePlayer.team,
+            alive: true,
+          });
+        }
+
+        // Await database persistence BEFORE mutating room.players array in RAM
+        await this.appendEvent(room, "PLAYER_JOINED", playerId, {
+          playerId,
+          playerName,
+        });
+
+        // Commit candidate player to RAM only after database confirms event persistence
+        existingPlayer = candidatePlayer;
+        room.players.push(existingPlayer);
+      }
+
+      const sessionToken = SessionManager.createSessionToken(
         playerId,
         playerName,
-      });
+        roomId,
+        existingPlayer.isHost
+      );
 
-      // Commit candidate player to RAM only after database confirms event persistence
-      existingPlayer = candidatePlayer;
-      room.players.push(existingPlayer);
-    }
-
-    const sessionToken = SessionManager.createSessionToken(
-      playerId,
-      playerName,
-      roomId,
-      existingPlayer.isHost
-    );
-
-    return { room, sessionToken };
+      return { room, sessionToken };
+    });
   }
 
   /**
@@ -347,7 +424,8 @@ export class RoomManager {
     options?: {
       selectedRolePool?: string[];
       fixedRoles?: SelectedRole[];
-    }
+    },
+    commandContext?: CommandRecord
   ): Promise<AuthoritativeRoomState> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
@@ -475,7 +553,7 @@ export class RoomManager {
           dayCount: candidateDayCount,
         },
       },
-    ]);
+    ], commandContext);
 
     // ONLY UPON SUCCESSFUL DATABASE BATCH COMMIT: Apply candidate state to RAM!
     room.players = candidatePlayers;
@@ -496,7 +574,8 @@ export class RoomManager {
     actorPlayerId: string,
     actionId: string,
     targetPlayerId: string | null,
-    secondaryTargetId?: string | null
+    secondaryTargetId?: string | null,
+    commandContext?: CommandRecord
   ): Promise<{ room: AuthoritativeRoomState; resolved: boolean }> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
@@ -517,7 +596,7 @@ export class RoomManager {
       actionId,
       targetPlayerId,
       secondaryTargetId: secondaryTargetId || null,
-    });
+    }, commandContext);
 
     // 2. Commit to RAM only after database persistence confirms success
     action.target_player_id = targetPlayerId;
@@ -656,7 +735,8 @@ export class RoomManager {
   public static async submitVote(
     roomId: string,
     voterId: string,
-    targetPlayerId: string
+    targetPlayerId: string,
+    commandContext?: CommandRecord
   ): Promise<{ room: AuthoritativeRoomState; resolved: boolean }> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
@@ -673,7 +753,7 @@ export class RoomManager {
     await this.appendEvent(room, "VOTE_CAST", voterId, {
       voterId,
       targetPlayerId,
-    });
+    }, commandContext);
 
     // 2. Commit vote to RAM only after database confirms persistence
     room.votes[voterId] = targetPlayerId;

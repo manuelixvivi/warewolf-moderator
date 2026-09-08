@@ -15,7 +15,7 @@ import { CommandValidationResult, AuthoritativeRoomState } from "../types";
 import { SessionManager } from "../auth/sessionManager";
 import { RoomManager } from "../rooms/roomManager";
 import { FogOfWarDispatcher } from "./fogOfWarDispatcher";
-import { defaultEventStore } from "../persistence";
+import { defaultEventStore, CommandRecord } from "../persistence";
 
 export class CommandDispatcher {
   /**
@@ -185,85 +185,93 @@ export class CommandDispatcher {
     }
 
     const roomId = rawParsed?.roomId;
-    const room = roomId ? RoomManager.getRoom(roomId) : undefined;
-
-    const validation = this.validateCommand(rawMessage, room);
-    if (validation.isDuplicate) {
-      // Fast-path in-memory idempotency check
-      return { success: true, isDuplicate: true };
+    if (!roomId || typeof roomId !== "string") {
+      return { success: false, error: "Missing or invalid roomId", errorCode: "INVALID_SCHEMA" };
     }
 
-    if (!validation.isValid || !validation.command || !room) {
-      return { success: false, error: validation.error, errorCode: validation.errorCode };
-    }
+    // STRICT FIFO PER-ROOM SERIALIZATION:
+    // All command validation, sequence generation, persistence, and state mutation
+    // are serialized per room to eliminate concurrent sequence collisions and race conditions.
+    return await RoomManager.enqueueRoomOperation(roomId, async () => {
+      const room = RoomManager.getRoom(roomId);
 
-    const { command } = validation;
-
-    // Crash-safe persistent idempotency check
-    const isPersistentDuplicate = await defaultEventStore.isCommandProcessed(command.roomId, command.commandId);
-    if (isPersistentDuplicate) {
-      if (!room.processedCommandIds) room.processedCommandIds = new Set();
-      room.processedCommandIds.add(command.commandId);
-      return { success: true, isDuplicate: true };
-    }
-
-    try {
-      switch (command.type) {
-        case "TOGGLE_READY": {
-          RoomManager.toggleReady(command.roomId, command.senderId);
-          break;
-        }
-
-        case "START_GAME": {
-          await RoomManager.startGame(command.roomId, command.senderId, command.payload);
-          break;
-        }
-
-        case "SUBMIT_NIGHT_ACTION": {
-          const payload = command.payload as SubmitNightActionCommandPayload;
-          await RoomManager.submitNightAction(
-            command.roomId,
-            command.senderId,
-            payload.actionId,
-            payload.targetPlayerId,
-            payload.secondaryTargetId
-          );
-          break;
-        }
-
-        case "CAST_VOTE": {
-          const payload = command.payload as CastVoteCommandPayload;
-          await RoomManager.submitVote(
-            command.roomId,
-            command.senderId,
-            payload.targetPlayerId
-          );
-          break;
-        }
-
-        default:
-          return { success: false, error: `Unsupported command type: ${command.type}`, errorCode: "INVALID_SCHEMA" };
+      const validation = this.validateCommand(rawMessage, room);
+      if (validation.isDuplicate) {
+        // Fast-path in-memory idempotency check
+        return { success: true, isDuplicate: true };
       }
 
-      // Record command persistently for crash-safe idempotency
-      await defaultEventStore.recordCommand({
+      if (!validation.isValid || !validation.command || !room) {
+        return { success: false, error: validation.error, errorCode: validation.errorCode };
+      }
+
+      const { command } = validation;
+
+      // Crash-safe persistent idempotency check
+      const isPersistentDuplicate = await defaultEventStore.isCommandProcessed(command.roomId, command.commandId);
+      if (isPersistentDuplicate) {
+        if (!room.processedCommandIds) room.processedCommandIds = new Set();
+        room.processedCommandIds.add(command.commandId);
+        return { success: true, isDuplicate: true };
+      }
+
+      const commandContext: CommandRecord = {
         commandId: command.commandId,
         roomId: command.roomId,
         senderId: command.senderId,
         commandType: command.type,
-      });
+        processedAt: Date.now(),
+      };
 
-      // Update in-memory registry
-      if (!room.processedCommandIds) {
-        room.processedCommandIds = new Set<string>();
+      try {
+        switch (command.type) {
+          case "TOGGLE_READY": {
+            RoomManager.toggleReady(command.roomId, command.senderId);
+            await defaultEventStore.recordCommand(commandContext);
+            if (!room.processedCommandIds) room.processedCommandIds = new Set();
+            room.processedCommandIds.add(command.commandId);
+            break;
+          }
+
+          case "START_GAME": {
+            await RoomManager.startGame(command.roomId, command.senderId, command.payload, commandContext);
+            break;
+          }
+
+          case "SUBMIT_NIGHT_ACTION": {
+            const payload = command.payload as SubmitNightActionCommandPayload;
+            await RoomManager.submitNightAction(
+              command.roomId,
+              command.senderId,
+              payload.actionId,
+              payload.targetPlayerId,
+              payload.secondaryTargetId,
+              commandContext
+            );
+            break;
+          }
+
+          case "CAST_VOTE": {
+            const payload = command.payload as CastVoteCommandPayload;
+            await RoomManager.submitVote(
+              command.roomId,
+              command.senderId,
+              payload.targetPlayerId,
+              commandContext
+            );
+            break;
+          }
+
+          default:
+            return { success: false, error: `Unsupported command type: ${command.type}`, errorCode: "INVALID_SCHEMA" };
+        }
+
+        // After state mutation, dispatch synchronized Fog-of-War updates
+        FogOfWarDispatcher.dispatchRoomSync(room);
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err.message };
       }
-      room.processedCommandIds.add(command.commandId);
-
-      // After state mutation, dispatch synchronized Fog-of-War updates
-      FogOfWarDispatcher.dispatchRoomSync(room);
-      return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
-    }
+    });
   }
 }

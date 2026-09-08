@@ -7,6 +7,7 @@
 
 import { Pool, PoolClient } from "pg";
 import { GameEvent } from "../../src/contracts";
+import { canonicalJsonStringify } from "../config";
 
 export interface MatchRecord {
   roomId: string;
@@ -41,8 +42,31 @@ export interface IEventStore {
     alive?: boolean;
     joinedAt?: number;
   }): Promise<void>;
+  createRoomAtomic(
+    match: MatchRecord,
+    hostParticipant: {
+      roomId: string;
+      playerId: string;
+      playerName: string;
+      isHost?: boolean;
+      roleId?: string;
+      canonicalName?: string;
+      team?: string;
+      alive?: boolean;
+      joinedAt?: number;
+    },
+    initEvent: GameEvent
+  ): Promise<void>;
   appendEvent<T = any>(event: GameEvent<T>): Promise<void>;
   appendBatch(events: GameEvent[]): Promise<void>;
+  appendEventWithCommand<T = any>(
+    event: GameEvent<T>,
+    command: CommandRecord
+  ): Promise<{ isDuplicate: boolean }>;
+  appendBatchWithCommand(
+    events: GameEvent[],
+    command: CommandRecord
+  ): Promise<{ isDuplicate: boolean }>;
   getEvents(roomId: string, fromSequence?: number, toSequence?: number): Promise<GameEvent[]>;
   getLatestSequence(roomId: string): Promise<number>;
   hasMatch(roomId: string): Promise<boolean>;
@@ -185,6 +209,76 @@ export class PostgresEventStore implements IEventStore {
     ]);
   }
 
+  public async createRoomAtomic(
+    match: MatchRecord,
+    hostParticipant: any,
+    initEvent: GameEvent
+  ): Promise<void> {
+    await this.init();
+    const client = await this.pool.connect();
+    const now = Date.now();
+    try {
+      await client.query("BEGIN");
+
+      // 1. Insert match projection record
+      await client.query(
+        `INSERT INTO matches (room_id, game_mode, host_player_id, host_player_name, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (room_id) DO NOTHING;`,
+        [
+          match.roomId,
+          match.gameMode,
+          match.hostPlayerId,
+          match.hostPlayerName,
+          match.status || "ACTIVE",
+          match.createdAt || now,
+          match.updatedAt || now,
+        ]
+      );
+
+      // 2. Insert host participant query projection
+      await client.query(
+        `INSERT INTO match_participants (room_id, player_id, player_name, role_id, canonical_name, team, alive, is_host, joined_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (room_id, player_id) DO NOTHING;`,
+        [
+          hostParticipant.roomId,
+          hostParticipant.playerId,
+          hostParticipant.playerName,
+          hostParticipant.roleId || null,
+          hostParticipant.canonicalName || null,
+          hostParticipant.team || null,
+          hostParticipant.alive !== undefined ? hostParticipant.alive : true,
+          hostParticipant.isHost ?? true,
+          hostParticipant.joinedAt || now,
+        ]
+      );
+
+      // 3. Insert initial event into canonical historical event log
+      await client.query(
+        `INSERT INTO game_events (event_id, room_id, sequence, event_type, actor_id, payload, server_signature, timestamp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
+        [
+          initEvent.eventId,
+          initEvent.roomId,
+          initEvent.sequence,
+          initEvent.type,
+          initEvent.actorId || null,
+          canonicalJsonStringify(initEvent.payload),
+          initEvent.serverSignature,
+          initEvent.timestamp || now,
+        ]
+      );
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   public async appendEvent<T = any>(event: GameEvent<T>): Promise<void> {
     await this.init();
     const query = `
@@ -197,7 +291,7 @@ export class PostgresEventStore implements IEventStore {
       event.sequence,
       event.type,
       event.actorId || null,
-      JSON.stringify(event.payload),
+      canonicalJsonStringify(event.payload),
       event.serverSignature,
       event.timestamp,
     ]);
@@ -220,12 +314,86 @@ export class PostgresEventStore implements IEventStore {
           event.sequence,
           event.type,
           event.actorId || null,
-          JSON.stringify(event.payload),
+          canonicalJsonStringify(event.payload),
           event.serverSignature,
           event.timestamp,
         ]);
       }
       await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Appends an event and records command idempotency in a single atomic database transaction.
+   */
+  public async appendEventWithCommand<T = any>(
+    event: GameEvent<T>,
+    command: CommandRecord
+  ): Promise<{ isDuplicate: boolean }> {
+    return this.appendBatchWithCommand([event], command);
+  }
+
+  /**
+   * Appends an event batch and records command idempotency in a single atomic database transaction.
+   * If the command was already processed, rolls back and reports duplicate without modifying event log.
+   */
+  public async appendBatchWithCommand(
+    events: GameEvent[],
+    command: CommandRecord
+  ): Promise<{ isDuplicate: boolean }> {
+    await this.init();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // 1. Transactional idempotency check
+      const checkRes = await client.query(
+        `SELECT 1 FROM processed_commands WHERE command_id = $1 AND room_id = $2;`,
+        [command.commandId, command.roomId]
+      );
+      if ((checkRes.rowCount ?? 0) > 0) {
+        await client.query("ROLLBACK");
+        return { isDuplicate: true };
+      }
+
+      // 2. Append events to canonical historical log
+      for (const event of events) {
+        const query = `
+          INSERT INTO game_events (event_id, room_id, sequence, event_type, actor_id, payload, server_signature, timestamp)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+        `;
+        await client.query(query, [
+          event.eventId,
+          event.roomId,
+          event.sequence,
+          event.type,
+          event.actorId || null,
+          canonicalJsonStringify(event.payload),
+          event.serverSignature,
+          event.timestamp,
+        ]);
+      }
+
+      // 3. Record command persistently in the exact same transaction
+      await client.query(
+        `INSERT INTO processed_commands (command_id, room_id, sender_id, command_type, processed_at)
+         VALUES ($1, $2, $3, $4, $5);`,
+        [
+          command.commandId,
+          command.roomId,
+          command.senderId,
+          command.commandType,
+          command.processedAt || Date.now(),
+        ]
+      );
+
+      await client.query("COMMIT");
+      return { isDuplicate: false };
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
@@ -349,6 +517,16 @@ export class InMemoryEventStore implements IEventStore {
     roomParts.set(p.playerId, { ...p });
   }
 
+  public async createRoomAtomic(
+    match: MatchRecord,
+    hostParticipant: any,
+    initEvent: GameEvent
+  ): Promise<void> {
+    await this.saveMatch(match);
+    await this.saveParticipant(hostParticipant);
+    await this.appendEvent(initEvent);
+  }
+
   public async appendEvent<T = any>(event: GameEvent<T>): Promise<void> {
     let list = this.eventsByRoom.get(event.roomId);
     if (!list) {
@@ -393,6 +571,25 @@ export class InMemoryEventStore implements IEventStore {
       list.push({ ...e });
     }
     list.sort((a, b) => a.sequence - b.sequence);
+  }
+
+  public async appendEventWithCommand<T = any>(
+    event: GameEvent<T>,
+    command: CommandRecord
+  ): Promise<{ isDuplicate: boolean }> {
+    return this.appendBatchWithCommand([event], command);
+  }
+
+  public async appendBatchWithCommand(
+    events: GameEvent[],
+    command: CommandRecord
+  ): Promise<{ isDuplicate: boolean }> {
+    if (await this.isCommandProcessed(command.roomId, command.commandId)) {
+      return { isDuplicate: true };
+    }
+    await this.appendBatch(events);
+    await this.recordCommand(command);
+    return { isDuplicate: false };
   }
 
   public async getEvents(
@@ -443,8 +640,21 @@ export class InMemoryEventStore implements IEventStore {
   }
 }
 
+// ------------------------------------------------------------
+// PRODUCTION PERSISTENCE GATE
+// ------------------------------------------------------------
+const isProduction = process.env.NODE_ENV === "production";
+const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+
+if (isProduction && !connectionString) {
+  throw new Error(
+    "[FATAL_PERSISTENCE_ERROR] Running in production mode (NODE_ENV=production) but no PostgreSQL DATABASE_URL or POSTGRES_URL was provided.\n" +
+    "ASPIRE: WEREWOLF mandates PostgreSQL as the canonical historical event store in production.\n" +
+    "Fallback to InMemoryEventStore is strictly prohibited in production to prevent catastrophic data loss upon container/process restart."
+  );
+}
+
 // Global EventStore Singleton
-export const defaultEventStore: IEventStore =
-  process.env.DATABASE_URL || process.env.POSTGRES_URL
-    ? new PostgresEventStore()
-    : new InMemoryEventStore();
+export const defaultEventStore: IEventStore = connectionString
+  ? new PostgresEventStore(connectionString)
+  : new InMemoryEventStore();
