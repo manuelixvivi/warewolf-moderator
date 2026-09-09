@@ -323,6 +323,7 @@ export interface SanitizedPublicPlayer {
   id: string;
   name: string;
   isHost: boolean;
+  isReady?: boolean;
   alive: boolean;
   silenced: boolean;
   // Zero role_id, team, or abilities leaked to public

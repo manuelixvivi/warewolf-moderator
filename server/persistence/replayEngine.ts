@@ -455,7 +455,7 @@ export class ReplayEngine {
     roomId: string,
     eventStore: IEventStore,
     upToSequence?: number,
-    options?: { verifySignatures?: boolean }
+    options?: { verifySignatures?: boolean; rearmTimers?: boolean }
   ): Promise<AuthoritativeRoomState | null> {
     const verifySignatures = options?.verifySignatures ?? true;
     const events = await eventStore.getEvents(roomId, 1, upToSequence);
@@ -482,35 +482,37 @@ export class ReplayEngine {
         ...Array.from(persistedCommands),
       ]);
 
-      // Re-arm disconnect timers if a player disconnected and deadline hasn't elapsed yet
-      const lastDisconnectEvents = new Map<string, { disconnectDeadline?: number }>();
-      for (const ev of events) {
-        if (ev.type === "PLAYER_DISCONNECTED") {
-          lastDisconnectEvents.set(ev.payload.playerId, ev.payload);
-        } else if (ev.type === "PLAYER_RECONNECTED" || ev.type === "PLAYER_DISCONNECT_TIMEOUT") {
-          lastDisconnectEvents.delete(ev.payload.playerId);
+      // Re-arm disconnect timers ONLY if explicitly in recovery mode and game is still active
+      if (options?.rearmTimers && state.phase !== "GAME_OVER") {
+        const lastDisconnectEvents = new Map<string, { disconnectDeadline?: number }>();
+        for (const ev of events) {
+          if (ev.type === "PLAYER_DISCONNECTED") {
+            lastDisconnectEvents.set(ev.payload.playerId, ev.payload);
+          } else if (ev.type === "PLAYER_RECONNECTED" || ev.type === "PLAYER_DISCONNECT_TIMEOUT") {
+            lastDisconnectEvents.delete(ev.payload.playerId);
+          }
         }
-      }
-      for (const [playerId, payload] of lastDisconnectEvents) {
-        if (payload?.disconnectDeadline) {
-          const remainingMs = payload.disconnectDeadline - Date.now();
-          if (remainingMs > 0) {
-            const timer = setTimeout(async () => {
-              state?.disconnectTimers.delete(playerId);
+        for (const [playerId, payload] of lastDisconnectEvents) {
+          if (payload?.disconnectDeadline) {
+            const remainingMs = payload.disconnectDeadline - Date.now();
+            if (remainingMs > 0) {
+              const timer = setTimeout(async () => {
+                state?.disconnectTimers.delete(playerId);
+                try {
+                  const { RoomManager } = await import("../rooms/roomManager");
+                  await RoomManager.handleDisconnectTimeout(roomId, playerId);
+                } catch (err) {
+                  console.error(`Error handling disconnect timeout for ${playerId}:`, err);
+                }
+              }, remainingMs);
+              state.disconnectTimers.set(playerId, timer);
+            } else {
+              // Grace period already expired while server was offline: emit canonical timeout
               try {
                 const { RoomManager } = await import("../rooms/roomManager");
-                await RoomManager.handleDisconnectTimeout(roomId, playerId);
-              } catch (err) {
-                console.error(`Error handling disconnect timeout for ${playerId}:`, err);
-              }
-            }, remainingMs);
-            state.disconnectTimers.set(playerId, timer);
-          } else {
-            // Grace period already expired while server was offline: emit canonical timeout
-            try {
-              const { RoomManager } = await import("../rooms/roomManager");
-              RoomManager.handleDisconnectTimeout(roomId, playerId).catch(() => {});
-            } catch {}
+                RoomManager.handleDisconnectTimeout(roomId, playerId).catch(() => {});
+              } catch {}
+            }
           }
         }
       }

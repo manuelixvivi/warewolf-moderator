@@ -39,13 +39,17 @@ export class FogOfWarDispatcher {
       voteTally: room.phase === "DAY_VOTING" || room.phase === "DAY_RESOLVING" ? undefined : undefined,
     });
 
-    const sanitizedPlayers: SanitizedPublicPlayer[] = rawPublic.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      isHost: p.isHost,
-      alive: p.alive,
-      silenced: p.silenced,
-    }));
+    const sanitizedPlayers: SanitizedPublicPlayer[] = rawPublic.players.map((p) => {
+      const roomPlayer = room.players.find((rp) => rp.id === p.id);
+      return {
+        id: p.id,
+        name: p.name,
+        isHost: p.isHost,
+        isReady: roomPlayer?.isReady ?? false,
+        alive: p.alive,
+        silenced: p.silenced,
+      };
+    });
 
     return {
       roomId: room.roomId,

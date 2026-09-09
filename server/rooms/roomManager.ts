@@ -106,7 +106,9 @@ export class RoomManager {
    * Recovers room state from the canonical EventStore after crash or eviction.
    */
   public static async recoverRoom(roomId: string): Promise<AuthoritativeRoomState | null> {
-    const recovered = await ReplayEngine.reconstructState(roomId, defaultEventStore);
+    const recovered = await ReplayEngine.reconstructState(roomId, defaultEventStore, undefined, {
+      rearmTimers: true,
+    });
     if (recovered) {
       this.rooms.set(roomId, recovered);
     }
@@ -125,7 +127,7 @@ export class RoomManager {
     actorId: string | undefined,
     payload: T,
     commandContext?: CommandRecord
-  ): Promise<GameEvent<T>> {
+  ): Promise<{ isDuplicate: boolean; event: GameEvent<T> }> {
     const candidateSequence = room.sequenceNumber + 1;
     const signature = signGameEvent(room.roomId, candidateSequence, type, payload);
 
@@ -144,7 +146,7 @@ export class RoomManager {
     if (commandContext) {
       const { isDuplicate } = await defaultEventStore.appendEventWithCommand(event, commandContext);
       if (isDuplicate) {
-        return event;
+        return { isDuplicate: true, event };
       }
       if (!room.processedCommandIds) room.processedCommandIds = new Set();
       room.processedCommandIds.add(commandContext.commandId);
@@ -157,7 +159,7 @@ export class RoomManager {
     room.eventLog.push(event);
     room.updatedAt = event.timestamp;
 
-    return event;
+    return { isDuplicate: false, event };
   }
 
   /**
@@ -169,8 +171,8 @@ export class RoomManager {
     room: AuthoritativeRoomState,
     eventsToCommit: Array<{ type: GameEventType; actorId?: string; payload: any }>,
     commandContext?: CommandRecord
-  ): Promise<GameEvent[]> {
-    if (eventsToCommit.length === 0) return [];
+  ): Promise<{ isDuplicate: boolean; events: GameEvent[] }> {
+    if (eventsToCommit.length === 0) return { isDuplicate: false, events: [] };
 
     let currentSeq = room.sequenceNumber;
     const preparedEvents: GameEvent[] = eventsToCommit.map((item) => {
@@ -191,7 +193,7 @@ export class RoomManager {
     if (commandContext) {
       const { isDuplicate } = await defaultEventStore.appendBatchWithCommand(preparedEvents, commandContext);
       if (isDuplicate) {
-        return preparedEvents;
+        return { isDuplicate: true, events: preparedEvents };
       }
       if (!room.processedCommandIds) room.processedCommandIds = new Set();
       room.processedCommandIds.add(commandContext.commandId);
@@ -206,7 +208,7 @@ export class RoomManager {
     }
     room.updatedAt = Date.now();
 
-    return preparedEvents;
+    return { isDuplicate: false, events: preparedEvents };
   }
 
   /**
@@ -451,7 +453,7 @@ export class RoomManager {
     const newReadyState = !player.isReady;
 
     // 1. AWAIT database append first (strict historical truth before RAM commit)
-    await this.appendEvent(
+    const { isDuplicate } = await this.appendEvent(
       room,
       "PLAYER_READY_CHANGED",
       playerId,
@@ -461,6 +463,11 @@ export class RoomManager {
       },
       commandContext
     );
+
+    // If duplicate command retransmission, NO-OP: return current state without mutation
+    if (isDuplicate) {
+      return room;
+    }
 
     // 2. Only upon successful persistence commit, update authoritative state in RAM
     player.isReady = newReadyState;
@@ -558,7 +565,7 @@ export class RoomManager {
 
     // ATOMIC PERSISTENCE: Commit GAME_STARTED, ROLES_ASSIGNED, and PHASE_TRANSITIONED together
     // Includes complete canonical role snapshot & ruleset version for immutable long-term replay
-    await this.appendBatch(room, [
+    const { isDuplicate } = await this.appendBatch(room, [
       {
         type: "GAME_STARTED",
         actorId: hostPlayerId,
@@ -609,26 +616,17 @@ export class RoomManager {
       },
     ], commandContext);
 
+    // If duplicate command retransmission, NO-OP: return current state without mutation
+    if (isDuplicate) {
+      return room;
+    }
+
     // ONLY UPON SUCCESSFUL DATABASE BATCH COMMIT: Apply candidate state to RAM!
     room.players = candidatePlayers;
     room.nightCount = candidateNightCount;
     room.dayCount = candidateDayCount;
     room.phase = candidatePhase;
     room.nightActions = candidateNightActions;
-
-    // Update query read-model projection in match_participants
-    if (defaultEventStore.updateParticipantsBatch) {
-      await defaultEventStore.updateParticipantsBatch(
-        room.roomId,
-        candidatePlayers.map((p) => ({
-          playerId: p.id,
-          roleId: p.role_id,
-          canonicalName: p.canonical_name,
-          team: p.team,
-          alive: p.alive,
-        }))
-      );
-    }
 
     return room;
   }
@@ -660,11 +658,16 @@ export class RoomManager {
     }
 
     // 1. AWAIT database persistence commit BEFORE mutating action in RAM
-    await this.appendEvent(room, "NIGHT_ACTION_SUBMITTED", actorPlayerId, {
+    const { isDuplicate } = await this.appendEvent(room, "NIGHT_ACTION_SUBMITTED", actorPlayerId, {
       actionId,
       targetPlayerId,
       secondaryTargetId: secondaryTargetId || null,
     }, commandContext);
+
+    // If duplicate command retransmission, NO-OP: return current state without mutation
+    if (isDuplicate) {
+      return { room, resolved: false };
+    }
 
     // 2. Commit to RAM only after database persistence confirms success
     action.target_player_id = targetPlayerId;
@@ -769,23 +772,6 @@ export class RoomManager {
     room.votes = {};
     room.nightActions = [];
 
-    // Update query read-model projections
-    const deadPlayers = candidatePlayers.filter((p: PlayerEngineState) => !p.alive);
-    if (defaultEventStore.updateParticipantsBatch && deadPlayers.length > 0) {
-      await defaultEventStore.updateParticipantsBatch(
-        room.roomId,
-        deadPlayers.map((p: PlayerEngineState) => ({ playerId: p.id, alive: false }))
-      );
-    }
-    if (candidatePhase === "GAME_OVER" && defaultEventStore.updateMatchStatus) {
-      await defaultEventStore.updateMatchStatus(
-        room.roomId,
-        "FINISHED",
-        winResult.winner || undefined,
-        winResult.reason || undefined
-      );
-    }
-
     return room;
   }
 
@@ -835,10 +821,21 @@ export class RoomManager {
     }
 
     // 1. AWAIT database persistence commit BEFORE updating votes in RAM
-    await this.appendEvent(room, "VOTE_CAST", voterId, {
+    const { isDuplicate } = await this.appendEvent(
+      room,
+      "VOTE_CAST",
       voterId,
-      targetPlayerId,
-    }, commandContext);
+      {
+        voterId,
+        targetPlayerId,
+      },
+      commandContext
+    );
+
+    // If duplicate command retransmission, NO-OP: return current state without mutation
+    if (isDuplicate) {
+      return { room, resolved: false };
+    }
 
     // 2. Commit vote to RAM only after database confirms persistence
     room.votes[voterId] = targetPlayerId;
@@ -939,20 +936,6 @@ export class RoomManager {
     room.nightActions = candidateNightActions;
     room.votes = {};
 
-    // Update query read-model projections
-    const eliminated = outcome.eliminatedPlayer;
-    if (defaultEventStore.updateParticipant && eliminated) {
-      await defaultEventStore.updateParticipant(room.roomId, eliminated.id, { alive: false });
-    }
-    if (candidatePhase === "GAME_OVER" && defaultEventStore.updateMatchStatus) {
-      await defaultEventStore.updateMatchStatus(
-        room.roomId,
-        "FINISHED",
-        winResult.winner || undefined,
-        winResult.reason || undefined
-      );
-    }
-
     return room;
   }
 
@@ -965,24 +948,26 @@ export class RoomManager {
     playerId: string,
     roomId: string
   ): Promise<void> {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) return;
 
-    // Clear disconnect grace period timer if reconnecting
-    const existingTimer = room.disconnectTimers.get(playerId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      room.disconnectTimers.delete(playerId);
-      await this.appendEvent(room, "PLAYER_RECONNECTED", playerId, { playerId });
-    }
+      // Clear disconnect grace period timer if reconnecting
+      const existingTimer = room.disconnectTimers.get(playerId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        room.disconnectTimers.delete(playerId);
+        await this.appendEvent(room, "PLAYER_RECONNECTED", playerId, { playerId });
+      }
 
-    room.clients.set(playerId, {
-      socketId,
-      socket,
-      playerId,
-      roomId,
-      isAlive: true,
-      lastPingAt: Date.now(),
+      room.clients.set(playerId, {
+        socketId,
+        socket,
+        playerId,
+        roomId,
+        isAlive: true,
+        lastPingAt: Date.now(),
+      });
     });
   }
 
@@ -990,28 +975,30 @@ export class RoomManager {
    * Handles client socket disconnection with grace period.
    */
   public static async handleClientDisconnect(roomId: string, playerId: string): Promise<void> {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) return;
 
-    room.clients.delete(playerId);
+      room.clients.delete(playerId);
 
-    const disconnectDeadline = Date.now() + config.disconnectGracePeriodMs;
-    await this.appendEvent(room, "PLAYER_DISCONNECTED", playerId, {
-      playerId,
-      disconnectDeadline,
+      const disconnectDeadline = Date.now() + config.disconnectGracePeriodMs;
+      await this.appendEvent(room, "PLAYER_DISCONNECTED", playerId, {
+        playerId,
+        disconnectDeadline,
+      });
+
+      // Set grace period timer that triggers authoritative disconnect timeout
+      const timer = setTimeout(async () => {
+        room.disconnectTimers.delete(playerId);
+        try {
+          await RoomManager.handleDisconnectTimeout(roomId, playerId);
+        } catch (err) {
+          console.error(`Error handling disconnect timeout for ${playerId} in ${roomId}:`, err);
+        }
+      }, config.disconnectGracePeriodMs);
+
+      room.disconnectTimers.set(playerId, timer);
     });
-
-    // Set grace period timer that triggers authoritative disconnect timeout
-    const timer = setTimeout(async () => {
-      room.disconnectTimers.delete(playerId);
-      try {
-        await RoomManager.handleDisconnectTimeout(roomId, playerId);
-      } catch (err) {
-        console.error(`Error handling disconnect timeout for ${playerId} in ${roomId}:`, err);
-      }
-    }, config.disconnectGracePeriodMs);
-
-    room.disconnectTimers.set(playerId, timer);
   }
 
   /**
@@ -1036,15 +1023,9 @@ export class RoomManager {
       // 2. Mutate RAM state only after persistence commit
       if (room.phase === "LOBBY") {
         room.players = room.players.filter((p) => p.id !== playerId);
-        if (defaultEventStore.updateParticipant) {
-          await defaultEventStore.updateParticipant(roomId, playerId, { alive: false });
-        }
       } else {
         // In active game, player is forfeited/eliminated
         player.alive = false;
-        if (defaultEventStore.updateParticipant) {
-          await defaultEventStore.updateParticipant(roomId, playerId, { alive: false });
-        }
       }
 
       FogOfWarDispatcher.dispatchRoomSync(room);

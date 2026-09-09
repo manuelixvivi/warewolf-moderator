@@ -40,7 +40,7 @@ export default function MultiplayerNight() {
   // Targets eligible for this player
   const validTargets = alivePlayers.filter((p) => {
     if (isBodyguard && p.id === me.id) return false; // Bodyguard cannot protect self
-    if (isWerewolf && (p.team === "Werewolf" || p.team === "Werewolf-aligned")) return false; // Wolves don't kill wolves
+    if (isWerewolf && p.id === me.id) return false; // Wolves don't target self
     return true;
   });
 
@@ -57,12 +57,11 @@ export default function MultiplayerNight() {
     setSubmitted(true);
   };
 
-  // Seer immediate live calculation
+  // Authoritative Seer result: read strictly from investigation history, NEVER inspect other players' secret client attributes
   const targetPlayer = alivePlayers.find((p) => p.id === selectedTargetId);
-  const seerResult = targetPlayer
-    ? targetPlayer.seer_result === "Werewolf"
-      ? "Werewolf"
-      : "Villager"
+  const historyEntry = selectedTargetId ? (seerResultHistory as any)[selectedTargetId] : null;
+  const seerResult: "Werewolf" | "Villager" | null = historyEntry
+    ? (typeof historyEntry === "string" ? historyEntry : historyEntry.result)
     : null;
 
   const completedActionsCount = nightActions.filter((a) => a.completed).length;

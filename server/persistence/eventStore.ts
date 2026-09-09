@@ -481,20 +481,96 @@ export class PostgresEventStore implements IEventStore {
 
   public async appendEvent<T = any>(event: GameEvent<T>): Promise<void> {
     await this.init();
-    const query = `
-      INSERT INTO game_events (event_id, room_id, sequence, event_type, actor_id, payload, server_signature, timestamp)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
-    `;
-    await this.pool.query(query, [
-      event.eventId,
-      event.roomId,
-      event.sequence,
-      event.type,
-      event.actorId || null,
-      canonicalJsonStringify(event.payload),
-      event.serverSignature,
-      event.timestamp,
-    ]);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const query = `
+        INSERT INTO game_events (event_id, room_id, sequence, event_type, actor_id, payload, server_signature, timestamp)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+      `;
+      await client.query(query, [
+        event.eventId,
+        event.roomId,
+        event.sequence,
+        event.type,
+        event.actorId || null,
+        canonicalJsonStringify(event.payload),
+        event.serverSignature,
+        event.timestamp,
+      ]);
+      await this.applyProjectionsInTransaction(client, [event]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async applyProjectionsInTransaction(client: PoolClient, events: GameEvent[]): Promise<void> {
+    for (const event of events) {
+      if (event.type === "ROLES_ASSIGNED" && event.payload?.assignments) {
+        for (const a of event.payload.assignments) {
+          await client.query(
+            `UPDATE match_participants
+             SET role_id = $3, canonical_name = $4, team = $5
+             WHERE room_id = $1 AND player_id = $2;`,
+            [event.roomId, a.playerId, a.role_id, a.canonical_name, a.team]
+          );
+        }
+      } else if (event.payload?.updatedPlayers && Array.isArray(event.payload.updatedPlayers)) {
+        for (const p of event.payload.updatedPlayers) {
+          await client.query(
+            `UPDATE match_participants
+             SET alive = $3, role_id = COALESCE($4, role_id), canonical_name = COALESCE($5, canonical_name), team = COALESCE($6, team)
+             WHERE room_id = $1 AND player_id = $2;`,
+            [event.roomId, p.id, p.alive, p.role_id || null, p.canonical_name || null, p.team || null]
+          );
+        }
+      } else if (event.type === "NIGHT_RESOLVED") {
+        const deadIds = new Set<string>([
+          ...(event.payload?.killedPlayerIds || []),
+          ...(event.payload?.cascadeCasualties || []),
+        ]);
+        for (const killedId of deadIds) {
+          await client.query(
+            `UPDATE match_participants
+             SET alive = false
+             WHERE room_id = $1 AND player_id = $2;`,
+            [event.roomId, killedId]
+          );
+        }
+      } else if (event.type === "VOTE_RESOLVED" && event.payload?.eliminatedPlayerId) {
+        await client.query(
+          `UPDATE match_participants
+           SET alive = false
+           WHERE room_id = $1 AND player_id = $2;`,
+          [event.roomId, event.payload.eliminatedPlayerId]
+        );
+      } else if (event.type === "ROLE_TRANSFORMED" && event.payload?.playerId) {
+        await client.query(
+          `UPDATE match_participants
+           SET role_id = $3, canonical_name = $4, team = $5
+           WHERE room_id = $1 AND player_id = $2;`,
+          [event.roomId, event.payload.playerId, event.payload.toRoleId, event.payload.canonicalName, event.payload.toTeam]
+        );
+      } else if (event.type === "PLAYER_DISCONNECT_TIMEOUT" && event.payload?.playerId) {
+        await client.query(
+          `UPDATE match_participants
+           SET alive = false
+           WHERE room_id = $1 AND player_id = $2;`,
+          [event.roomId, event.payload.playerId]
+        );
+      } else if (event.type === "WIN_CONDITION_SATISFIED") {
+        await client.query(
+          `UPDATE matches
+           SET status = 'COMPLETED', winner = $2, win_reason = $3, updated_at = $4
+           WHERE room_id = $1;`,
+          [event.roomId, event.payload.winner || null, event.payload.reason || null, event.timestamp]
+        );
+      }
+    }
   }
 
   public async appendBatch(events: GameEvent[]): Promise<void> {
@@ -519,6 +595,8 @@ export class PostgresEventStore implements IEventStore {
           event.timestamp,
         ]);
       }
+      // Apply read-model projections in the exact same atomic transaction
+      await this.applyProjectionsInTransaction(client, events);
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -591,6 +669,9 @@ export class PostgresEventStore implements IEventStore {
           command.processedAt || Date.now(),
         ]
       );
+
+      // 4. Apply read-model projections in the exact same atomic transaction
+      await this.applyProjectionsInTransaction(client, events);
 
       await client.query("COMMIT");
       return { isDuplicate: false };
@@ -816,6 +897,63 @@ export class InMemoryEventStore implements IEventStore {
 
     list.push({ ...event });
     list.sort((a, b) => a.sequence - b.sequence);
+    this.applyProjectionsInMemory([event]);
+  }
+
+  private applyProjectionsInMemory(events: GameEvent[]): void {
+    for (const event of events) {
+      const roomParts = this.participants.get(event.roomId);
+      if (event.type === "ROLES_ASSIGNED" && event.payload?.assignments) {
+        for (const a of event.payload.assignments) {
+          const p = roomParts?.get(a.playerId);
+          if (p) {
+            p.roleId = a.role_id;
+            p.canonicalName = a.canonical_name;
+            p.team = a.team;
+          }
+        }
+      } else if (event.payload?.updatedPlayers && Array.isArray(event.payload.updatedPlayers)) {
+        for (const up of event.payload.updatedPlayers) {
+          const p = roomParts?.get(up.id);
+          if (p) {
+            p.alive = up.alive;
+            if (up.role_id) p.roleId = up.role_id;
+            if (up.canonical_name) p.canonicalName = up.canonical_name;
+            if (up.team) p.team = up.team;
+          }
+        }
+      } else if (event.type === "NIGHT_RESOLVED") {
+        const deadIds = new Set<string>([
+          ...(event.payload?.killedPlayerIds || []),
+          ...(event.payload?.cascadeCasualties || []),
+        ]);
+        for (const killedId of deadIds) {
+          const p = roomParts?.get(killedId);
+          if (p) p.alive = false;
+        }
+      } else if (event.type === "VOTE_RESOLVED" && event.payload?.eliminatedPlayerId) {
+        const p = roomParts?.get(event.payload.eliminatedPlayerId);
+        if (p) p.alive = false;
+      } else if (event.type === "ROLE_TRANSFORMED" && event.payload?.playerId) {
+        const p = roomParts?.get(event.payload.playerId);
+        if (p) {
+          p.roleId = event.payload.toRoleId;
+          p.canonicalName = event.payload.canonicalName;
+          p.team = event.payload.toTeam;
+        }
+      } else if (event.type === "PLAYER_DISCONNECT_TIMEOUT" && event.payload?.playerId) {
+        const p = roomParts?.get(event.payload.playerId);
+        if (p) p.alive = false;
+      } else if (event.type === "WIN_CONDITION_SATISFIED") {
+        const match = this.matches.get(event.roomId);
+        if (match) {
+          match.status = "COMPLETED";
+          match.winner = event.payload.winner;
+          match.winReason = event.payload.reason;
+          match.updatedAt = event.timestamp;
+        }
+      }
+    }
   }
 
   public async appendBatch(events: GameEvent[]): Promise<void> {
@@ -843,6 +981,9 @@ export class InMemoryEventStore implements IEventStore {
       list.push({ ...e });
     }
     list.sort((a, b) => a.sequence - b.sequence);
+
+    // Apply read-model projections atomically
+    this.applyProjectionsInMemory(events);
   }
 
   public async appendEventWithCommand<T = any>(
@@ -864,6 +1005,10 @@ export class InMemoryEventStore implements IEventStore {
     const eventsSnapshot = existingEvents ? [...existingEvents] : undefined;
     const existingCmds = this.processedCommandsByRoom.get(roomId);
     const cmdsSnapshot = existingCmds ? new Set(existingCmds) : undefined;
+    const existingParts = this.participants.get(roomId);
+    const partsSnapshot = existingParts ? new Map(Array.from(existingParts.entries()).map(([k, v]) => [k, { ...v }])) : undefined;
+    const existingMatch = this.matches.get(roomId);
+    const matchSnapshot = existingMatch ? { ...existingMatch } : undefined;
 
     try {
       await this.appendBatch(events);
@@ -879,6 +1024,16 @@ export class InMemoryEventStore implements IEventStore {
         this.processedCommandsByRoom.set(roomId, cmdsSnapshot);
       } else {
         this.processedCommandsByRoom.delete(roomId);
+      }
+      if (partsSnapshot !== undefined) {
+        this.participants.set(roomId, partsSnapshot);
+      } else {
+        this.participants.delete(roomId);
+      }
+      if (matchSnapshot !== undefined) {
+        this.matches.set(roomId, matchSnapshot);
+      } else {
+        this.matches.delete(roomId);
       }
       throw err;
     }

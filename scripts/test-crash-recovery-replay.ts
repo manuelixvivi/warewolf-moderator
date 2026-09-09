@@ -1066,12 +1066,13 @@ async function runPhase4VerificationSuite() {
     const concurrentOps = Array.from({ length: 10 }, (_, i) => {
       const idx = i + 1;
       return RoomManager.enqueueRoomOperation(concurrentRoomId, async () => {
-        return RoomManager.appendEvent(
+        const res = await RoomManager.appendEvent(
           room,
           "PLAYER_JOINED",
           `player-${idx}`,
           { playerId: `player-${idx}`, playerName: `Player ${idx}` }
         );
+        return res.event;
       });
     });
 
