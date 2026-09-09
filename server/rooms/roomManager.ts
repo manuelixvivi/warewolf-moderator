@@ -650,16 +650,18 @@ export class RoomManager {
     }
 
     const action = room.nightActions.find(
-      (a) => a.id === actionId && a.player_ids.includes(actorPlayerId)
+      (a) => (a.id === actionId || !actionId) && a.player_ids.includes(actorPlayerId)
     );
 
     if (!action) {
-      throw new Error(`Action ${actionId} not found or actor ${actorPlayerId} unauthorized.`);
+      throw new Error(`Action ${actionId || "auto"} not found or actor ${actorPlayerId} unauthorized.`);
     }
+
+    const effectiveActionId = action.id;
 
     // 1. AWAIT database persistence commit BEFORE mutating action in RAM
     const { isDuplicate } = await this.appendEvent(room, "NIGHT_ACTION_SUBMITTED", actorPlayerId, {
-      actionId,
+      actionId: effectiveActionId,
       targetPlayerId,
       secondaryTargetId: secondaryTargetId || null,
     }, commandContext);
@@ -936,6 +938,44 @@ export class RoomManager {
     room.nightActions = candidateNightActions;
     room.votes = {};
 
+    return room;
+  }
+
+  /**
+   * Resets match from GAME_OVER back to LOBBY for a new round in the same room.
+   */
+  public static async restartGame(
+    roomId: string,
+    hostPlayerId: string,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error(`Room ${roomId} not found.`);
+    if (room.phase !== "GAME_OVER") throw new Error(`Can only restart game from GAME_OVER, current: ${room.phase}`);
+    if (room.hostPlayerId !== hostPlayerId) throw new Error("Only the host can restart the game.");
+
+    // 1. Commit PHASE_TRANSITIONED event to DB first
+    await this.appendEvent(room, "PHASE_TRANSITIONED", hostPlayerId, {
+      phase: "LOBBY",
+      dayCount: 0,
+      nightCount: 0,
+    }, commandContext);
+
+    // 2. Reset RAM room state
+    room.phase = "LOBBY";
+    room.dayCount = 0;
+    room.nightCount = 0;
+    room.votes = {};
+    room.nightActions = [];
+    for (const p of room.players) {
+      p.alive = true;
+      p.isReady = false;
+      p.silenced = false;
+      p.protected = false;
+      p.inCult = false;
+      p.hasUsedAbility = false;
+    }
+    room.updatedAt = Date.now();
     return room;
   }
 

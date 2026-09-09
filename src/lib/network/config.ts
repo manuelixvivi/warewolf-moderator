@@ -24,15 +24,21 @@ export function getNetworkConfig(): NetworkConfig {
     }
   }
 
+  const defaultHost = isBrowser ? window.location.hostname : "localhost";
+  const defaultPort = 4000;
+  const isHttps = isBrowser && window.location.protocol === "https:";
+  const defaultHttpProto = isHttps ? "https:" : "http:";
+  const defaultWsProto = isHttps ? "wss:" : "ws:";
+
   const serverWsUrl =
     (isBrowser && (window as any).__ASPIRE_WS_URL__) ||
     process.env.NEXT_PUBLIC_WS_URL ||
-    "ws://localhost:4000/ws";
+    `${defaultWsProto}//${defaultHost}:${defaultPort}/ws`;
 
   const serverHttpUrl =
     (isBrowser && (window as any).__ASPIRE_HTTP_URL__) ||
     process.env.NEXT_PUBLIC_HTTP_URL ||
-    "http://localhost:4000";
+    `${defaultHttpProto}//${defaultHost}:${defaultPort}`;
 
   return {
     useAuthoritativeWss,

@@ -93,6 +93,10 @@ export type CommandType =
   | "START_GAME"
   | "SUBMIT_NIGHT_ACTION"
   | "CAST_VOTE"
+  | "START_DAY_VOTING"
+  | "RESOLVE_NIGHT"
+  | "RESOLVE_DAY_VOTES"
+  | "RESTART_GAME"
   | "SEND_CHAT"
   | "REQUEST_SYNC"
   | "RECONNECT";
@@ -326,7 +330,10 @@ export interface SanitizedPublicPlayer {
   isReady?: boolean;
   alive: boolean;
   silenced: boolean;
-  // Zero role_id, team, or abilities leaked to public
+  // Zero role_id, team, or abilities leaked to public during active game
+  role_id?: string;
+  canonical_name?: string;
+  team?: FactionAlignment;
 }
 
 export interface SanitizedPublicGameState {

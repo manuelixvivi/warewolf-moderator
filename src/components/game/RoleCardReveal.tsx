@@ -61,27 +61,21 @@ const TEAM_GLOW: Record<string, { border: string; bg: string; text: string; badg
 };
 
 export default function RoleCardReveal() {
-  const { players, myPlayerId, room, proceedToNight, setPlayerReady } = useGameStore();
+  const { players, myPlayerId, room, proceedToNight, setPlayerReady, myPrivateRole } = useGameStore();
   const [isRevealed, setIsRevealed] = useState(false);
 
   const me = players.find((p) => p.id === myPlayerId) || players[0];
   const isHost = room?.hostId === myPlayerId;
   const readyCount = players.filter((p) => p.isReady).length;
 
-  const roleName = me?.canonical_name || "Villager";
-  const roleTeam = me?.team || "Village";
+  const roleName = myPrivateRole?.canonical_name || me?.canonical_name || "Villager";
+  const roleTeam = myPrivateRole?.team || me?.team || "Village";
   const roleIcon = ROLE_ICONS[roleName] || "🎭";
   const teamStyle = TEAM_GLOW[roleTeam] || TEAM_GLOW.Village;
 
-  // If I am a Werewolf, find fellow werewolves
+  // Authoritative Fog-of-War: Fellow werewolves delivered strictly via private player state
   const isWerewolf = roleTeam === "Werewolf" || roleTeam === "Werewolf-aligned";
-  const fellowWerewolves = isWerewolf
-    ? players.filter(
-        (p) =>
-          p.id !== me.id &&
-          (p.team === "Werewolf" || p.team === "Werewolf-aligned")
-      )
-    : [];
+  const fellowWerewolves = isWerewolf ? (myPrivateRole?.fellowTeamMembers || []) : [];
 
   return (
     <div className="min-h-[calc(100vh-65px)] bg-gray-950 text-white flex flex-col items-center justify-center px-4 py-8 relative overflow-hidden">

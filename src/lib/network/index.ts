@@ -11,14 +11,9 @@ export {
   type EventListener,
   type ErrorListener,
   type ConnectionListener,
+  type ChatMessageListener,
   type OptimisticInteractionState,
 } from "./websocketClient";
 
 export { getNetworkConfig, type NetworkConfig } from "./config";
 
-/**
- * @deprecated Legacy prototype network broker (MQTT / PeerJS / BroadcastChannel).
- * Scheduled for decommissioning after Phase 8 load & hardening tests.
- * Use `authoritativeWsClient` for all authoritative match lifecycle actions.
- */
-export { network as legacyNetwork } from "../network";

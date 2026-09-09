@@ -39,6 +39,7 @@ export class FogOfWarDispatcher {
       voteTally: room.phase === "DAY_VOTING" || room.phase === "DAY_RESOLVING" ? undefined : undefined,
     });
 
+    const isGameOver = room.phase === "GAME_OVER";
     const sanitizedPlayers: SanitizedPublicPlayer[] = rawPublic.players.map((p) => {
       const roomPlayer = room.players.find((rp) => rp.id === p.id);
       return {
@@ -48,6 +49,13 @@ export class FogOfWarDispatcher {
         isReady: roomPlayer?.isReady ?? false,
         alive: p.alive,
         silenced: p.silenced,
+        ...(isGameOver && roomPlayer
+          ? {
+              role_id: roomPlayer.role_id,
+              canonical_name: roomPlayer.canonical_name,
+              team: roomPlayer.team as FactionAlignment,
+            }
+          : {}),
       };
     });
 

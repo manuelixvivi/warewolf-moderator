@@ -13,15 +13,16 @@ export default function MultiplayerNight() {
     submitNightAction,
     resolveNightPhase,
     seerResultHistory,
+    myPrivateRole,
   } = useGameStore();
 
   const isHost = room?.hostId === myPlayerId;
   const me = players.find((p) => p.id === myPlayerId) || players[0];
   const isAlive = me?.alive ?? true;
 
-  const roleName = me?.canonical_name || "Villager";
-  const roleTeam = me?.team || "Village";
-  const actionType = me?.action_type || "";
+  const roleName = myPrivateRole?.canonical_name || me?.canonical_name || "Villager";
+  const roleTeam = myPrivateRole?.team || me?.team || "Village";
+  const actionType = myPrivateRole?.abilities?.[0] || me?.action_type || "";
   const isWerewolf = roleTeam === "Werewolf" || roleTeam === "Werewolf-aligned";
   const isSeer = roleName.toLowerCase().includes("seer");
   const isBodyguard = roleName.toLowerCase().includes("bodyguard");

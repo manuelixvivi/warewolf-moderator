@@ -54,12 +54,19 @@ export async function registerWebSocketGateway(fastify: FastifyInstance): Promis
       return;
     }
 
-    // Register connected socket
+    // Register connected socket asynchronously and dispatch initial sync upon registration
     const socketId = `sock-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    RoomManager.registerClientSocket(socketId, socket, playerId, roomId);
-
-    // Immediately dispatch initial synchronized Fog-of-War state
-    FogOfWarDispatcher.dispatchRoomSync(room);
+    (async () => {
+      try {
+        await RoomManager.registerClientSocket(socketId, socket, playerId, roomId);
+        const currentRoom = RoomManager.getRoom(roomId);
+        if (currentRoom) {
+          FogOfWarDispatcher.dispatchRoomSync(currentRoom);
+        }
+      } catch (err) {
+        fastify.log.error({ err, playerId, roomId }, "Failed to register socket");
+      }
+    })();
 
     // Handle incoming frames
     socket.on("message", async (raw: Buffer | string) => {

@@ -20,6 +20,7 @@ export type PrivateStateListener = (state: SanitizedPrivatePlayerState) => void;
 export type EventListener = (event: GameEvent) => void;
 export type ErrorListener = (error: { code?: string; message: string }) => void;
 export type ConnectionListener = (connected: boolean) => void;
+export type ChatMessageListener = (message: any) => void;
 
 export interface OptimisticInteractionState {
   isPending: boolean;
@@ -56,6 +57,7 @@ export class AuthoritativeWebSocketClient {
   private eventListeners = new Set<EventListener>();
   private errorListeners = new Set<ErrorListener>();
   private connectionListeners = new Set<ConnectionListener>();
+  private chatMessageListeners = new Set<ChatMessageListener>();
 
   constructor() {
     const config = getNetworkConfig();
@@ -100,6 +102,11 @@ export class AuthoritativeWebSocketClient {
   public onConnectionChange(listener: ConnectionListener): () => void {
     this.connectionListeners.add(listener);
     return () => this.connectionListeners.delete(listener);
+  }
+
+  public onChatMessage(listener: ChatMessageListener): () => void {
+    this.chatMessageListeners.add(listener);
+    return () => this.chatMessageListeners.delete(listener);
   }
 
   // ------------------------------------------------------------
@@ -292,6 +299,11 @@ export class AuthoritativeWebSocketClient {
         break;
       }
 
+      case "CHAT_MESSAGE": {
+        this.notifyChatMessage(message.message);
+        break;
+      }
+
       default:
         // Ignore unhandled frame types
         break;
@@ -360,6 +372,16 @@ export class AuthoritativeWebSocketClient {
         l(connected);
       } catch (err) {
         console.error("Error in connectionListener:", err);
+      }
+    });
+  }
+
+  private notifyChatMessage(message: any): void {
+    this.chatMessageListeners.forEach((l) => {
+      try {
+        l(message);
+      } catch (err) {
+        console.error("Error in chatMessageListener:", err);
       }
     });
   }

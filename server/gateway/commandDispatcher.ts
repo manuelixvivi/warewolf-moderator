@@ -204,6 +204,42 @@ export class CommandDispatcher {
       }
     }
 
+    if (command.type === "START_DAY_VOTING") {
+      if (room.hostPlayerId !== command.senderId) {
+        return { isValid: false, error: "Only the host can open voting.", errorCode: "NOT_PERMITTED" };
+      }
+      if (room.phase !== "DAY_DISCUSSION") {
+        return { isValid: false, error: `Cannot start voting from phase ${room.phase}.`, errorCode: "INVALID_PHASE" };
+      }
+    }
+
+    if (command.type === "RESOLVE_NIGHT") {
+      if (room.hostPlayerId !== command.senderId) {
+        return { isValid: false, error: "Only the host can resolve night.", errorCode: "NOT_PERMITTED" };
+      }
+      if (room.phase !== "NIGHT_ACTIVE") {
+        return { isValid: false, error: `Cannot resolve night from phase ${room.phase}.`, errorCode: "INVALID_PHASE" };
+      }
+    }
+
+    if (command.type === "RESOLVE_DAY_VOTES") {
+      if (room.hostPlayerId !== command.senderId) {
+        return { isValid: false, error: "Only the host can resolve day votes.", errorCode: "NOT_PERMITTED" };
+      }
+      if (room.phase !== "DAY_VOTING") {
+        return { isValid: false, error: `Cannot resolve day votes from phase ${room.phase}.`, errorCode: "INVALID_PHASE" };
+      }
+    }
+
+    if (command.type === "RESTART_GAME") {
+      if (room.hostPlayerId !== command.senderId) {
+        return { isValid: false, error: "Only the host can restart the game.", errorCode: "NOT_PERMITTED" };
+      }
+      if (room.phase !== "GAME_OVER") {
+        return { isValid: false, error: `Cannot restart game from phase ${room.phase}.`, errorCode: "INVALID_PHASE" };
+      }
+    }
+
     return {
       isValid: true,
       command,
@@ -252,7 +288,7 @@ export class CommandDispatcher {
         return { success: false, error: validation.error, errorCode: validation.errorCode };
       }
 
-      const { command } = validation;
+      const { command, player } = validation;
 
       // Crash-safe persistent idempotency check
       const isPersistentDuplicate = await defaultEventStore.isCommandProcessed(command.roomId, command.commandId);
@@ -319,6 +355,61 @@ export class CommandDispatcher {
               commandContext
             );
             break;
+          }
+
+          case "START_DAY_VOTING": {
+            await RoomManager.startDayVoting(command.roomId);
+            break;
+          }
+
+          case "RESOLVE_NIGHT": {
+            await RoomManager.resolveNightPhase(room);
+            break;
+          }
+
+          case "RESOLVE_DAY_VOTES": {
+            const isTimeout = Boolean(command.payload?.isTimeout);
+            await RoomManager.resolveDayVotePhase(room, isTimeout);
+            break;
+          }
+
+          case "RESTART_GAME": {
+            await RoomManager.restartGame(command.roomId, command.senderId, commandContext);
+            break;
+          }
+
+          case "SEND_CHAT": {
+            const { text, channel } = command.payload || {};
+            if (!text || typeof text !== "string") break;
+            const chatMsg = {
+              id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              senderId: command.senderId,
+              senderName: player?.name || "Pemain",
+              channel: channel || "DAY_PUBLIC",
+              text: text.trim(),
+              timestamp: Date.now(),
+              isDead: !player?.alive,
+            };
+
+            const isWolfChat = channel === "WOLF_SECRET";
+            const chatPayload = JSON.stringify({
+              type: "CHAT_MESSAGE",
+              message: chatMsg,
+            });
+
+            for (const [pId, client] of room.clients.entries()) {
+              if (client.socket && client.socket.readyState === 1 /* OPEN */) {
+                if (isWolfChat) {
+                  const targetP = room.players.find((p) => p.id === pId);
+                  if (targetP && (targetP.team === "Werewolf" || targetP.team === "Werewolf-aligned")) {
+                    client.socket.send(chatPayload);
+                  }
+                } else {
+                  client.socket.send(chatPayload);
+                }
+              }
+            }
+            return { success: true };
           }
 
           default:
