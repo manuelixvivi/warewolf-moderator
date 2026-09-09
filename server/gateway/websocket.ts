@@ -112,7 +112,7 @@ export async function registerWebSocketGateway(fastify: FastifyInstance): Promis
         RoomManager.handleClientDisconnect(roomId, playerId, socketId);
       });
 
-      socket.on("error", (err) => {
+      socket.on("error", (err: any) => {
         fastify.log.error({ err, playerId, roomId }, "WebSocket error");
         RoomManager.handleClientDisconnect(roomId, playerId, socketId);
       });

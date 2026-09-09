@@ -1070,7 +1070,7 @@ async function runHardeningSuite() {
     });
     const wolf1VoteRes1 = await CommandDispatcher.handleCommand(wolf1VoteCmd1);
     assert(wolf1VoteRes1.success === true, "[Pack Vote] Wolf 1 votes for Villager 1 successfully");
-    assert(packRoom.packVotes[pWolf1] === pVill1, "[Pack Vote] RAM state records Wolf 1 vote for Villager 1");
+    assert(packRoom.packVotes?.[pWolf1] === pVill1, "[Pack Vote] RAM state records Wolf 1 vote for Villager 1");
 
     // 3. Wolf 1 dynamic vote update (Wolf 1 changes vote to Villager 2 -> Replaces, exactly 1 current vote)
     const wolf1VoteCmd2 = JSON.stringify({
@@ -1084,7 +1084,7 @@ async function runHardeningSuite() {
     });
     const wolf1VoteRes2 = await CommandDispatcher.handleCommand(wolf1VoteCmd2);
     assert(wolf1VoteRes2.success === true, "[Pack Vote] Wolf 1 dynamically switches vote to Villager 2");
-    assert(packRoom.packVotes[pWolf1] === pVill2, "[Pack Vote] Wolf 1 vote updated to Villager 2 (1 vote per wolf)");
+    assert(packRoom.packVotes?.[pWolf1] === pVill2, "[Pack Vote] Wolf 1 vote updated to Villager 2 (1 vote per wolf)");
 
     // 4. Wolf 2 votes for Villager 1 -> Creates a 1 vs 1 tie!
     const wolf2VoteCmd1 = JSON.stringify({
@@ -1098,7 +1098,7 @@ async function runHardeningSuite() {
     });
     const wolf2VoteRes1 = await CommandDispatcher.handleCommand(wolf2VoteCmd1);
     assert(wolf2VoteRes1.success === true, "[Pack Vote] Wolf 2 votes for Villager 1");
-    assert(packRoom.packVotes[pWolf2] === pVill1, "[Pack Vote] Tie created (Wolf 1 -> Villager 2, Wolf 2 -> Villager 1)");
+    assert(packRoom.packVotes?.[pWolf2] === pVill1, "[Pack Vote] Tie created (Wolf 1 -> Villager 2, Wolf 2 -> Villager 1)");
 
     // 5. Tally initial vote -> Tie detected! Launches 10s Revote restricted to tied targets
     await RoomManager.closePackVoteAndTally(packRoomId);
@@ -1110,7 +1110,7 @@ async function runHardeningSuite() {
       packRoom.packVoteWindow?.allowedTargets?.length === 2,
       "[Pack Revote] Allowed targets restricted strictly to tied candidates (Villager 1 & 2)"
     );
-    assert(Object.keys(packRoom.packVotes).length === 0, "[Pack Revote] Votes reset for revote round");
+    assert(Object.keys(packRoom.packVotes || {}).length === 0, "[Pack Revote] Votes reset for revote round");
 
     // 6. Wolf votes for candidate NOT in allowedTargets during revote -> Rejected
     const invalidTargetCmd = JSON.stringify({

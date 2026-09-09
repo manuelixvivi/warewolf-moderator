@@ -132,7 +132,7 @@ async function runE2ETest() {
         errorsReceived: [],
       };
 
-      socket.on("message", (raw) => {
+      socket.on("message", (raw: any) => {
         try {
           const msg = JSON.parse(raw.toString());
           client.optimisticPending = false; // Reset optimistic flag on server response
@@ -151,7 +151,7 @@ async function runE2ETest() {
       });
 
       socket.on("open", () => resolve(client));
-      socket.on("error", (err) => reject(err));
+      socket.on("error", (err: any) => reject(err));
     });
   };
 
