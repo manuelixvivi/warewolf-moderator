@@ -63,7 +63,25 @@ export class ReplayEngine {
           clients: new Map(),
           disconnectTimers: new Map(),
           processedCommandIds: new Set(),
+          targetPlayerCount: payload.targetPlayerCount,
+          selectedRoles: payload.selectedRoles,
+          selectedRolePool: payload.selectedRolePool,
           createdAt: event.timestamp,
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "ROOM_CONFIG_UPDATED": {
+        if (!state) throw new Error("Cannot apply ROOM_CONFIG_UPDATED on uninitialized state.");
+        const payload = event.payload;
+        return {
+          ...state,
+          sequenceNumber: event.sequence,
+          gameMode: payload.gameMode || state.gameMode,
+          targetPlayerCount: payload.targetPlayerCount !== undefined ? payload.targetPlayerCount : state.targetPlayerCount,
+          selectedRoles: payload.selectedRoles !== undefined ? payload.selectedRoles : state.selectedRoles,
+          selectedRolePool: payload.selectedRolePool !== undefined ? payload.selectedRolePool : state.selectedRolePool,
+          eventLog: [...state.eventLog, event],
           updatedAt: event.timestamp,
         };
       }
@@ -237,8 +255,25 @@ export class ReplayEngine {
         if (!state) throw new Error("Cannot apply PHASE_TRANSITIONED on uninitialized state.");
         const payload = event.payload;
         let nightActions = state.nightActions;
+        let players = state.players;
+        let activeWinResult = state.activeWinResult;
+        let lastNightResult = state.lastNightResult;
+
         if (payload.phase === "NIGHT_ACTIVE") {
           nightActions = buildEngineNightActions(state.players, payload.nightCount || state.nightCount, false);
+        } else if (payload.phase === "LOBBY") {
+          nightActions = [];
+          activeWinResult = null;
+          lastNightResult = null;
+          players = state.players.map((p) => ({
+            ...p,
+            alive: true,
+            isReady: false,
+            silenced: false,
+            protected: false,
+            inCult: false,
+            hasUsedAbility: false,
+          }));
         }
 
         return {
@@ -246,8 +281,11 @@ export class ReplayEngine {
           phase: payload.phase,
           dayCount: payload.dayCount !== undefined ? payload.dayCount : state.dayCount,
           nightCount: payload.nightCount !== undefined ? payload.nightCount : state.nightCount,
+          players,
           nightActions,
-          votes: payload.phase === "DAY_VOTING" || payload.phase === "NIGHT_ACTIVE" ? {} : state.votes,
+          activeWinResult,
+          lastNightResult,
+          votes: payload.phase === "DAY_VOTING" || payload.phase === "NIGHT_ACTIVE" || payload.phase === "LOBBY" ? {} : state.votes,
           sequenceNumber: event.sequence,
           eventLog: [...state.eventLog, event],
           updatedAt: event.timestamp,
@@ -272,6 +310,137 @@ export class ReplayEngine {
         return {
           ...state,
           nightActions,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "PACK_VOTE_STARTED": {
+        if (!state) throw new Error("Cannot apply PACK_VOTE_STARTED on uninitialized state.");
+        const payload = event.payload;
+        return {
+          ...state,
+          packVotes: {},
+          packVoteWindow: {
+            startedAt: payload.startedAt,
+            expiresAt: payload.expiresAt,
+            isRevote: false,
+            eligibleWolfIds: state.players.filter((p) => (p.team === "Werewolf" || p.category === "Werewolf") && p.alive).map((p) => p.id),
+          },
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "PACK_VOTE_UPDATED": {
+        if (!state) throw new Error("Cannot apply PACK_VOTE_UPDATED on uninitialized state.");
+        const payload = event.payload;
+        const packVotes = payload.votes
+          ? { ...payload.votes }
+          : { ...(state.packVotes || {}), [payload.voterPlayerId]: payload.targetPlayerId };
+        return {
+          ...state,
+          packVotes,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "PACK_REVOTE_STARTED": {
+        if (!state) throw new Error("Cannot apply PACK_REVOTE_STARTED on uninitialized state.");
+        const payload = event.payload;
+        return {
+          ...state,
+          packVotes: {},
+          packVoteWindow: {
+            startedAt: payload.startedAt,
+            expiresAt: payload.expiresAt,
+            isRevote: true,
+            allowedTargets: payload.allowedTargets || [],
+            eligibleWolfIds: state.players.filter((p) => (p.team === "Werewolf" || p.category === "Werewolf") && p.alive).map((p) => p.id),
+          },
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "PACK_VOTE_CLOSED": {
+        if (!state) throw new Error("Cannot apply PACK_VOTE_CLOSED on uninitialized state.");
+        return {
+          ...state,
+          packVoteWindow: undefined,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "PACK_TARGET_RESOLVED": {
+        if (!state) throw new Error("Cannot apply PACK_TARGET_RESOLVED on uninitialized state.");
+        const payload = event.payload;
+        const targetPlayerId = payload.targetPlayerId || null;
+        const nightActions = state.nightActions.map((a) => {
+          if (a.id === "SYSTEM-WEREWOLF-PACK" || a.action_type === "Kill" || a.role_name.toLowerCase().includes("werewolf")) {
+            return {
+              ...a,
+              target_player_id: targetPlayerId,
+              completed: true,
+            };
+          }
+          return a;
+        });
+        return {
+          ...state,
+          nightActions,
+          packVoteWindow: undefined,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "SEER_WINDOW_STARTED": {
+        if (!state) throw new Error("Cannot apply SEER_WINDOW_STARTED on uninitialized state.");
+        const payload = event.payload;
+        return {
+          ...state,
+          seerActionState: {
+            startedAt: payload.startedAt,
+            expiresAt: payload.expiresAt,
+            checked: false,
+          },
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "SEER_CHECK_RESOLVED": {
+        if (!state) throw new Error("Cannot apply SEER_CHECK_RESOLVED on uninitialized state.");
+        const payload = event.payload;
+        const nightActions = state.nightActions.map((a) => {
+          if (a.action_type === "Investigate" || a.role_id === "ROLE-002" || a.player_ids.includes(payload.seerPlayerId)) {
+            return {
+              ...a,
+              target_player_id: payload.targetPlayerId,
+              completed: true,
+            };
+          }
+          return a;
+        });
+        return {
+          ...state,
+          nightActions,
+          seerActionState: {
+            ...(state.seerActionState || { startedAt: event.timestamp, expiresAt: event.timestamp }),
+            checked: true,
+            targetPlayerId: payload.targetPlayerId,
+            result: payload.result,
+          },
           sequenceNumber: event.sequence,
           eventLog: [...state.eventLog, event],
           updatedAt: event.timestamp,
@@ -314,6 +483,9 @@ export class ReplayEngine {
           ...state,
           players,
           nightActions: [],
+          packVotes: {},
+          packVoteWindow: undefined,
+          seerActionState: undefined,
           sequenceNumber: event.sequence,
           eventLog: [...state.eventLog, event],
           updatedAt: event.timestamp,
@@ -430,6 +602,44 @@ export class ReplayEngine {
         return {
           ...state,
           phase: "GAME_OVER",
+          activeWinResult: event.payload,
+          sequenceNumber: event.sequence,
+          eventLog: [...state.eventLog, event],
+          updatedAt: event.timestamp,
+        };
+      }
+
+      case "MATCH_RESTARTED": {
+        if (!state) throw new Error("Cannot apply MATCH_RESTARTED on uninitialized state.");
+        const payload = event.payload;
+        const resetMap = new Map((payload.resetPlayers || []).map((rp: any) => [rp.playerId, rp]));
+        const players = state.players.map((p) => {
+          const reset = resetMap.get(p.id) as any;
+          return {
+            ...p,
+            alive: true,
+            isReady: false,
+            silenced: false,
+            protected: false,
+            inCult: false,
+            hasUsedAbility: false,
+            ...(reset || {}),
+          };
+        });
+
+        return {
+          ...state,
+          phase: "LOBBY",
+          dayCount: 0,
+          nightCount: 0,
+          players,
+          votes: {},
+          nightActions: [],
+          packVotes: {},
+          packVoteWindow: undefined,
+          seerActionState: undefined,
+          activeWinResult: null,
+          lastNightResult: null,
           sequenceNumber: event.sequence,
           eventLog: [...state.eventLog, event],
           updatedAt: event.timestamp,
@@ -462,7 +672,16 @@ export class ReplayEngine {
     if (events.length === 0) return null;
 
     let state: AuthoritativeRoomState | null = null;
+    let expectedSequence = 1;
     for (const event of events) {
+      // Event Sequence Integrity: must start at 1 and increment contiguously without gaps
+      if (event.sequence !== expectedSequence) {
+        throw new Error(
+          `[TamperDetected] Event sequence gap detected in room ${roomId}. Expected sequence ${expectedSequence}, but got ${event.sequence}. Missing or deleted events detected!`
+        );
+      }
+      expectedSequence++;
+
       if (verifySignatures) {
         const isValid = verifyGameEventSignature(event);
         if (!isValid) {
@@ -529,7 +748,18 @@ export class ReplayEngine {
     eventStore: IEventStore
   ): Promise<{ valid: boolean; totalAudited: number; tamperedEvent?: GameEvent; error?: string }> {
     const events = await eventStore.getEvents(roomId);
+    let expectedSequence = 1;
     for (const event of events) {
+      if (event.sequence !== expectedSequence) {
+        return {
+          valid: false,
+          totalAudited: events.length,
+          tamperedEvent: event,
+          error: `Tamper detected: non-contiguous sequence gap in room ${roomId}. Expected sequence ${expectedSequence}, but got ${event.sequence}`,
+        };
+      }
+      expectedSequence++;
+
       const isValid = verifyGameEventSignature(event);
       if (!isValid) {
         return {

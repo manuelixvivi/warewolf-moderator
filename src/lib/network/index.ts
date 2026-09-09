@@ -1,6 +1,6 @@
 // ============================================================
 // ASPIRE: WEREWOLF — Network Layer Barrel Export
-// Phase 3: Primary Authoritative WSS Adapter with Legacy MQTT Fallback
+// Phase 3 & 4: Authoritative WebSocket (WSS) Client Adapter
 // ============================================================
 
 export {

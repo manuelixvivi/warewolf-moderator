@@ -89,14 +89,13 @@ export function validateMode1Fixed(
  * Enforces:
  * 1. Minimum 5 players
  * 2. At least one wolf-side role in the pool
- * 3. Role pool must contain at least playerCount unique roles, OR contain 'Villager' to pad remaining slots.
- *    Special roles are NEVER duplicated.
+ * 3. Role pool must not be empty. Roles are sampled with replacement strictly from the host's pool.
  */
 export function validateMode2Pool(
   poolRoles: SelectedRole[],
-  playerCount: number
+  playerCount?: number
 ): { valid: boolean; error?: string } {
-  if (playerCount < MINIMUM_PLAYERS) {
+  if (playerCount !== undefined && playerCount < MINIMUM_PLAYERS) {
     return {
       valid: false,
       error: `Minimal pemain adalah ${MINIMUM_PLAYERS} orang. Saat ini ada ${playerCount} pemain.`,
@@ -129,19 +128,6 @@ export function validateMode2Pool(
     };
   }
 
-  // Enforce pool cardinality: special roles cannot be duplicated.
-  // Duplication is only permissible for generic Villagers if present in pool.
-  const hasVillager = roleObjects.some(
-    (r) => r.role_id === "ROLE-024" || r.canonical_name === "Villager"
-  );
-
-  if (roleObjects.length < playerCount && !hasVillager) {
-    return {
-      valid: false,
-      error: `Jumlah peran di pool (${roleObjects.length}) kurang dari jumlah pemain (${playerCount}), dan peran 'Villager' tidak ada di pool untuk mengisi sisa kursi. Tambahkan peran ke pool hingga minimal ${playerCount} peran unik.`,
-    };
-  }
-
   return { valid: true };
 }
 
@@ -154,16 +140,14 @@ export interface CandidateLogItem {
 
 /**
  * Mode 2: Constrained Heuristic Balance Search from Host's Allowed Pool
- * Evaluates candidate subsets drawn strictly from the host's pool without replacement.
- * Minimizes balance penalty score |totalBalanceWeight| while guaranteeing:
- * 1. Wolf presence (at least 1 werewolf, scaled to player count up to available wolves).
- * 2. Strict role uniqueness (no accidental duplication of unique roles).
- * 3. Multi-card padding is strictly restricted to generic Villagers when pool size < playerCount.
+ * Evaluates candidate subsets drawn strictly from the host's pool using pure sampling with replacement.
+ * Evaluates balance weights via calculateCompositionBalance and selects the optimal candidate.
+ * NEVER introduces any role outside the host's pool and never injects external Villagers.
  */
 export function auditSelectBalancedSubsetFromPool(
   poolRoles: SelectedRole[],
   playerCount: number,
-  maxIterations: number = 60
+  maxIterations: number = 80
 ): {
   selected: RoleData[];
   bestScore: number;
@@ -193,19 +177,13 @@ export function auditSelectBalancedSubsetFromPool(
       r.category === "Werewolf"
   );
 
-  const villagerRole =
-    pool.find((r) => r.role_id === "ROLE-024" || r.canonical_name === "Villager") ||
-    ALL_ROLES.find((r) => r.canonical_name === "Villager") ||
-    ALL_ROLES[0];
+  const nonWolfPool = pool.filter((r) => !wolfPool.some((w) => w.role_id === r.role_id));
+  const sourcePool = nonWolfPool.length > 0 ? nonWolfPool : pool;
 
   // Target wolf count based on player count
   const targetWolfCount = Math.max(
     1,
     playerCount <= 6 ? 1 : playerCount <= 9 ? 2 : playerCount <= 13 ? 3 : 4
-  );
-  const effectiveTargetWolves = Math.min(
-    targetWolfCount,
-    wolfPool.length > 0 ? wolfPool.length : 1
   );
 
   const candidateLog: CandidateLogItem[] = [];
@@ -214,27 +192,17 @@ export function auditSelectBalancedSubsetFromPool(
 
   // Generate and evaluate candidate combinations via constrained heuristic search
   for (let iter = 0; iter < maxIterations; iter++) {
-    // 1. Pick wolves strictly without replacement
-    const shuffledWolves = shuffleRoles([...wolfPool]);
-    const pickedWolves = shuffledWolves.slice(0, effectiveTargetWolves);
-    const candidate: RoleData[] = [...pickedWolves];
+    const candidate: RoleData[] = [];
 
-    // Track roles already picked to guarantee zero accidental duplicates
-    const pickedRoleIds = new Set<string>(candidate.map((r) => r.role_id));
+    // 1. Pick wolves from wolfPool with replacement
+    for (let i = 0; i < targetWolfCount; i++) {
+      candidate.push(wolfPool[Math.floor(Math.random() * wolfPool.length)]);
+    }
 
-    // 2. Pick remaining roles strictly without replacement from rest of pool
-    const remainingPool = pool.filter((r) => !pickedRoleIds.has(r.role_id));
-    const shuffledRest = shuffleRoles([...remainingPool]);
+    // 2. Fill remaining player slots strictly from sourcePool with replacement
     const needed = playerCount - candidate.length;
-
-    if (shuffledRest.length >= needed) {
-      candidate.push(...shuffledRest.slice(0, needed));
-    } else {
-      // Pool size is less than playerCount (allowed only if Villager is in the pool)
-      candidate.push(...shuffledRest);
-      while (candidate.length < playerCount) {
-        candidate.push(villagerRole);
-      }
+    for (let i = 0; i < needed; i++) {
+      candidate.push(sourcePool[Math.floor(Math.random() * sourcePool.length)]);
     }
 
     // 3. Score candidate
@@ -262,12 +230,10 @@ export function auditSelectBalancedSubsetFromPool(
   }
 
   if (!bestCandidate) {
-    const fallbackWolves = wolfPool.slice(0, effectiveTargetWolves);
-    const fallbackIds = new Set(fallbackWolves.map((r) => r.role_id));
-    const fallbackRest = pool.filter((r) => !fallbackIds.has(r.role_id));
-    bestCandidate = [...fallbackWolves, ...fallbackRest].slice(0, playerCount);
+    bestCandidate = [];
+    const source = pool.length > 0 ? pool : [wolfPool[0]];
     while (bestCandidate.length < playerCount) {
-      bestCandidate.push(villagerRole);
+      bestCandidate.push(source[bestCandidate.length % source.length]);
     }
   }
 

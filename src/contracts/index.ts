@@ -92,6 +92,8 @@ export type CommandType =
   | "TOGGLE_READY"
   | "START_GAME"
   | "SUBMIT_NIGHT_ACTION"
+  | "WEREWOLF_PACK_VOTE"
+  | "SEER_CHECK"
   | "CAST_VOTE"
   | "START_DAY_VOTING"
   | "RESOLVE_NIGHT"
@@ -99,7 +101,28 @@ export type CommandType =
   | "RESTART_GAME"
   | "SEND_CHAT"
   | "REQUEST_SYNC"
-  | "RECONNECT";
+  | "RECONNECT"
+  | "UPDATE_ROOM_CONFIG";
+
+export interface SelectedRole {
+  role_id: string;
+  canonical_name: string;
+  count: number;
+}
+
+export interface UpdateRoomConfigCommandPayload {
+  gameMode?: GameMode;
+  targetPlayerCount?: number;
+  selectedRoles?: SelectedRole[];
+  selectedRolePool?: string[];
+}
+
+export interface RoomConfigUpdatedPayload {
+  gameMode?: GameMode;
+  targetPlayerCount?: number;
+  selectedRoles?: SelectedRole[];
+  selectedRolePool?: string[];
+}
 
 export interface BaseCommand<T = any> {
   commandId: string;
@@ -117,6 +140,14 @@ export interface SubmitNightActionCommandPayload {
   secondaryTargetId?: string | null;
 }
 
+export interface WerewolfPackVoteCommandPayload {
+  targetPlayerId: string;
+}
+
+export interface SeerCheckCommandPayload {
+  targetPlayerId: string;
+}
+
 export interface CastVoteCommandPayload {
   targetPlayerId: string; // Player ID or "SKIP"
 }
@@ -130,10 +161,18 @@ export type GameEventType =
   | "PLAYER_READY_CHANGED"
   | "PLAYER_DISCONNECTED"
   | "PLAYER_RECONNECTED"
+  | "ROOM_CONFIG_UPDATED"
   | "GAME_STARTED"
   | "ROLES_ASSIGNED"
   | "PHASE_TRANSITIONED"
   | "NIGHT_ACTION_SUBMITTED"
+  | "PACK_VOTE_STARTED"
+  | "PACK_VOTE_UPDATED"
+  | "PACK_REVOTE_STARTED"
+  | "PACK_VOTE_CLOSED"
+  | "PACK_TARGET_RESOLVED"
+  | "SEER_WINDOW_STARTED"
+  | "SEER_CHECK_RESOLVED"
   | "NIGHT_RESOLVED"
   | "DEATH_CASCADE_TRIGGERED"
   | "ROLE_TRANSFORMED"
@@ -142,7 +181,64 @@ export type GameEventType =
   | "TIMEOUT_OCCURRED"
   | "PLAYER_DISCONNECT_TIMEOUT"
   | "WIN_CONDITION_SATISFIED"
+  | "MATCH_RESTARTED"
   | "NARRATIVE_LORE_EMITTED";
+
+export interface PackVoteStartedPayload {
+  startedAt: number;
+  expiresAt: number;
+  isRevote: boolean;
+  allowedTargets?: string[];
+}
+
+export interface PackVoteUpdatedPayload {
+  voterPlayerId: string;
+  targetPlayerId: string;
+  votes: Record<string, string>;
+}
+
+export interface PackRevoteStartedPayload {
+  startedAt: number;
+  expiresAt: number;
+  allowedTargets: string[];
+}
+
+export interface PackVoteClosedPayload {
+  tally: Record<string, number>;
+  resolvedTargetId: string | null;
+}
+
+export interface PackTargetResolvedPayload {
+  targetPlayerId: string | null;
+  isTieBreakFailure?: boolean;
+}
+
+export interface SeerWindowStartedPayload {
+  startedAt: number;
+  expiresAt: number;
+  seerPlayerId: string;
+}
+
+export interface SeerCheckResolvedPayload {
+  seerPlayerId: string;
+  targetPlayerId: string;
+  result: "Werewolf" | "Villager";
+}
+
+export interface MatchRestartedPayload {
+  phase: "LOBBY";
+  dayCount: number;
+  nightCount: number;
+  resetPlayers: Array<{
+    playerId: string;
+    alive: boolean;
+    isReady: boolean;
+    silenced: boolean;
+    protected: boolean;
+    inCult: boolean;
+    hasUsedAbility: boolean;
+  }>;
+}
 
 export interface PlayerReadyChangedPayload {
   playerId: string;
@@ -346,7 +442,25 @@ export interface SanitizedPublicGameState {
   players: SanitizedPublicPlayer[];
   currentNarrative: string;
   winResult: CanonicalWinResult | null;
+  targetPlayerCount?: number;
+  selectedRoles?: SelectedRole[];
+  selectedRolePool?: string[];
   votes?: Record<string, string>; // Revealed only during/after voting
+  nightActionProgress?: {
+    totalEligible: number;
+    completedCount: number;
+  };
+  packVoteProgress?: {
+    startedAt: number;
+    expiresAt: number;
+    isRevote: boolean;
+    isClosed: boolean;
+  };
+  publicNightResult?: {
+    killed: string[];
+    protected: string[];
+    silenced: string[];
+  } | null;
 }
 
 export interface SanitizedPrivatePlayerState {
@@ -359,6 +473,20 @@ export interface SanitizedPrivatePlayerState {
   seer_result: "Werewolf" | "Villager";
   fellowTeamMembers?: Array<{ id: string; name: string; role: string }>; // Wolf pack or Masons
   privilegedKnowledge?: Record<string, any>; // Doppelganger target, Seer history
+  packVotes?: Record<string, string>; // Wolf pack votes: voterId -> targetPlayerId (visible strictly to alive wolves)
+  packVoteWindow?: {
+    startedAt: number;
+    expiresAt: number;
+    isRevote: boolean;
+    allowedTargets?: string[];
+  };
+  seerWindow?: {
+    startedAt: number;
+    expiresAt: number;
+    checked: boolean;
+    result?: "Werewolf" | "Villager";
+    targetPlayerId?: string;
+  };
 }
 
 // ------------------------------------------------------------

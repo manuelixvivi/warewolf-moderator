@@ -85,6 +85,7 @@ export interface IEventStore {
   recordCommand(cmd: CommandRecord): Promise<void>;
   isCommandProcessed(roomId: string, commandId: string): Promise<boolean>;
   getProcessedCommandIds(roomId: string): Promise<Set<string>>;
+  getActiveRoomIds(): Promise<string[]>;
   clearRoom?(roomId: string): Promise<void>;
 }
 
@@ -323,7 +324,7 @@ export class PostgresEventStore implements IEventStore {
       await client.query("BEGIN");
 
       // 1. Insert match projection record
-      await client.query(
+      const matchRes = await client.query(
         `INSERT INTO matches (room_id, game_mode, host_player_id, host_player_name, status, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (room_id) DO NOTHING;`,
@@ -337,6 +338,9 @@ export class PostgresEventStore implements IEventStore {
           match.updatedAt || now,
         ]
       );
+      if (matchRes.rowCount === 0) {
+        throw new Error(`Room collision: Room ${match.roomId} already exists.`);
+      }
 
       // 2. Insert host participant query projection
       await client.query(
@@ -414,16 +418,10 @@ export class PostgresEventStore implements IEventStore {
         }
       }
 
-      // 2. Insert match_participant read-model projection
+      // 2. Insert match_participant read-model projection (strict INSERT, no UPSERT)
       await client.query(
         `INSERT INTO match_participants (room_id, player_id, player_name, role_id, canonical_name, team, alive, is_host, joined_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (room_id, player_id) DO UPDATE
-         SET player_name = EXCLUDED.player_name,
-             role_id = COALESCE(EXCLUDED.role_id, match_participants.role_id),
-             canonical_name = COALESCE(EXCLUDED.canonical_name, match_participants.canonical_name),
-             team = COALESCE(EXCLUDED.team, match_participants.team),
-             alive = EXCLUDED.alive;`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
         [
           participant.roomId,
           participant.playerId,
@@ -569,6 +567,23 @@ export class PostgresEventStore implements IEventStore {
            WHERE room_id = $1;`,
           [event.roomId, event.payload.winner || null, event.payload.reason || null, event.timestamp]
         );
+      } else if (event.type === "MATCH_RESTARTED") {
+        await client.query(
+          `UPDATE matches
+           SET status = 'ACTIVE', winner = NULL, win_reason = NULL, updated_at = $2
+           WHERE room_id = $1;`,
+          [event.roomId, event.timestamp]
+        );
+        if (event.payload?.resetPlayers && Array.isArray(event.payload.resetPlayers)) {
+          for (const rp of event.payload.resetPlayers) {
+            await client.query(
+              `UPDATE match_participants
+               SET alive = true
+               WHERE room_id = $1 AND player_id = $2;`,
+              [event.roomId, rp.playerId]
+            );
+          }
+        }
       }
     }
   }
@@ -748,6 +763,13 @@ export class PostgresEventStore implements IEventStore {
     return new Set(res.rows.map((r) => r.commandId));
   }
 
+  public async getActiveRoomIds(): Promise<string[]> {
+    await this.init();
+    const query = `SELECT room_id as "roomId" FROM matches WHERE status = 'ACTIVE' ORDER BY created_at ASC;`;
+    const res = await this.pool.query(query);
+    return res.rows.map((r) => r.roomId);
+  }
+
   public async clearRoom(roomId: string): Promise<void> {
     await this.init();
     await this.pool.query(`DELETE FROM matches WHERE room_id = $1`, [roomId]);
@@ -832,6 +854,9 @@ export class InMemoryEventStore implements IEventStore {
     initEvent: GameEvent
   ): Promise<void> {
     const roomId = match.roomId;
+    if (this.matches.has(roomId)) {
+      throw new Error(`Room collision: Room ${roomId} already exists.`);
+    }
     const oldMatch = this.matches.get(roomId);
     const oldParts = this.participants.get(roomId);
     const oldEvents = this.eventsByRoom.get(roomId);
@@ -860,17 +885,19 @@ export class InMemoryEventStore implements IEventStore {
       return { isDuplicate: true };
     }
     let roomParts = this.participants.get(participant.roomId);
-    const oldParticipant = roomParts?.get(participant.playerId);
+    if (!roomParts) {
+      roomParts = new Map();
+      this.participants.set(participant.roomId, roomParts);
+    }
+    if (roomParts.has(participant.playerId)) {
+      throw new Error(`Participant collision: Player ${participant.playerId} already in room ${participant.roomId}`);
+    }
 
     await this.saveParticipant(participant);
     try {
       await this.appendEvent(joinEvent);
     } catch (err) {
-      if (oldParticipant) {
-        roomParts!.set(participant.playerId, oldParticipant);
-      } else if (roomParts) {
-        roomParts.delete(participant.playerId);
-      }
+      roomParts.delete(participant.playerId);
       throw err;
     }
 
@@ -951,6 +978,20 @@ export class InMemoryEventStore implements IEventStore {
           match.winner = event.payload.winner;
           match.winReason = event.payload.reason;
           match.updatedAt = event.timestamp;
+        }
+      } else if (event.type === "MATCH_RESTARTED") {
+        const match = this.matches.get(event.roomId);
+        if (match) {
+          match.status = "ACTIVE";
+          match.winner = undefined;
+          match.winReason = undefined;
+          match.updatedAt = event.timestamp;
+        }
+        if (event.payload?.resetPlayers && Array.isArray(event.payload.resetPlayers)) {
+          for (const rp of event.payload.resetPlayers) {
+            const p = roomParts?.get(rp.playerId);
+            if (p) p.alive = true;
+          }
         }
       }
     }
@@ -1077,6 +1118,16 @@ export class InMemoryEventStore implements IEventStore {
   public async getProcessedCommandIds(roomId: string): Promise<Set<string>> {
     const set = this.processedCommandsByRoom.get(roomId);
     return set ? new Set(set) : new Set();
+  }
+
+  public async getActiveRoomIds(): Promise<string[]> {
+    const active: string[] = [];
+    for (const [roomId, match] of this.matches.entries()) {
+      if ((match.status || "ACTIVE") === "ACTIVE") {
+        active.push(roomId);
+      }
+    }
+    return active;
   }
 
   public async clearRoom(roomId: string): Promise<void> {

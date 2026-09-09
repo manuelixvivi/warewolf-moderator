@@ -6,6 +6,7 @@
 // ============================================================
 
 import { AsyncLocalStorage } from "async_hooks";
+import { randomBytes } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import {
   AuthoritativeRoomState,
@@ -21,13 +22,14 @@ import {
 import { config, signGameEvent } from "../config";
 import { SessionManager } from "../auth/sessionManager";
 import { PlayerEngineState, EngineNightAction } from "../../src/lib/engine/types";
-import { ROLE_BY_ID, ALL_ROLES, buildEngineNightActions } from "../../src/lib/engine/abilityRegistry";
+import { ROLE_BY_ID, ALL_ROLES, buildEngineNightActions, validateAbilityTarget, canParticipateInWerewolfPackVote } from "../../src/lib/engine/abilityRegistry";
 import { resolveNightActions } from "../../src/lib/engine/actionResolver";
 import { resolveDeathChain } from "../../src/lib/engine/deathResolver";
 import { resolveDayVotes } from "../../src/lib/engine/voteResolver";
 import { evaluateWinConditions } from "../../src/lib/engine/winEngine";
 import {
   selectBalancedSubsetFromPool,
+  validateMode2Pool,
   generateBalancedRandomComposition,
   shuffleRoles,
   MINIMUM_PLAYERS,
@@ -129,13 +131,15 @@ export class RoomManager {
     commandContext?: CommandRecord
   ): Promise<{ isDuplicate: boolean; event: GameEvent<T> }> {
     const candidateSequence = room.sequenceNumber + 1;
-    const signature = signGameEvent(room.roomId, candidateSequence, type, payload);
+    const eventId = uuidv7();
+    const timestamp = Date.now();
+    const signature = signGameEvent(room.roomId, candidateSequence, type, payload, eventId, timestamp, actorId);
 
     const event: GameEvent<T> = {
-      eventId: uuidv7(),
+      eventId,
       roomId: room.roomId,
       sequence: candidateSequence,
-      timestamp: Date.now(),
+      timestamp,
       type,
       actorId,
       payload,
@@ -177,15 +181,17 @@ export class RoomManager {
     let currentSeq = room.sequenceNumber;
     const preparedEvents: GameEvent[] = eventsToCommit.map((item) => {
       currentSeq++;
+      const eventId = uuidv7();
+      const timestamp = Date.now();
       return {
-        eventId: uuidv7(),
+        eventId,
         roomId: room.roomId,
         sequence: currentSeq,
-        timestamp: Date.now(),
+        timestamp,
         type: item.type,
         actorId: item.actorId,
         payload: item.payload,
-        serverSignature: signGameEvent(room.roomId, currentSeq, item.type, item.payload),
+        serverSignature: signGameEvent(room.roomId, currentSeq, item.type, item.payload, eventId, timestamp, item.actorId),
       };
     });
 
@@ -218,9 +224,34 @@ export class RoomManager {
     hostPlayerId: string,
     hostPlayerName: string,
     gameMode: AuthoritativeRoomState["gameMode"] = "MODE_1_FIXED",
-    customRoomId?: string
+    customRoomId?: string,
+    config?: {
+      targetPlayerCount?: number;
+      selectedRoles?: SelectedRole[];
+      selectedRolePool?: string[];
+    }
   ): Promise<{ room: AuthoritativeRoomState; sessionToken: string }> {
-    const roomId = customRoomId || `ROOM-${Math.floor(1000 + Math.random() * 9000)}`;
+    let roomId = customRoomId ? customRoomId.trim().toUpperCase() : "";
+
+    if (roomId) {
+      if (this.rooms.has(roomId) || (await defaultEventStore.hasMatch(roomId))) {
+        throw new Error(`Room collision: Room ${roomId} already exists.`);
+      }
+    } else {
+      // Generate a unique 5-char code with collision check
+      let attempts = 0;
+      while (attempts < 10) {
+        const candidate = `WOLF-${randomBytes(3).toString("hex").toUpperCase()}`;
+        if (!this.rooms.has(candidate) && !(await defaultEventStore.hasMatch(candidate))) {
+          roomId = candidate;
+          break;
+        }
+        attempts++;
+      }
+      if (!roomId) {
+        roomId = `WOLF-${uuidv7().substring(0, 8).toUpperCase()}`;
+      }
+    }
 
     const hostPlayer: PlayerEngineState = {
       id: hostPlayerId,
@@ -252,13 +283,18 @@ export class RoomManager {
       gameMode,
       hostPlayerId,
       hostPlayerName,
+      targetPlayerCount: config?.targetPlayerCount,
+      selectedRoles: config?.selectedRoles,
+      selectedRolePool: config?.selectedRolePool,
     };
-    const initEventSignature = signGameEvent(roomId, 1, "ROOM_INITIALIZED", initEventPayload);
+    const eventId = uuidv7();
+    const timestamp = Date.now();
+    const initEventSignature = signGameEvent(roomId, 1, "ROOM_INITIALIZED", initEventPayload, eventId, timestamp, hostPlayerId);
     const initEvent: GameEvent = {
-      eventId: uuidv7(),
+      eventId,
       roomId,
       sequence: 1,
-      timestamp: Date.now(),
+      timestamp,
       type: "ROOM_INITIALIZED",
       actorId: hostPlayerId,
       payload: initEventPayload,
@@ -305,6 +341,9 @@ export class RoomManager {
       clients: new Map(),
       disconnectTimers: new Map(),
       processedCommandIds: new Set(),
+      targetPlayerCount: config?.targetPlayerCount,
+      selectedRoles: config?.selectedRoles,
+      selectedRolePool: config?.selectedRolePool,
       createdAt: initEvent.timestamp,
       updatedAt: initEvent.timestamp,
     };
@@ -328,10 +367,14 @@ export class RoomManager {
     roomId: string,
     playerId: string,
     playerName: string,
-    commandContext?: CommandRecord
+    commandContext?: CommandRecord,
+    clientSessionToken?: string
   ): Promise<{ room: AuthoritativeRoomState; sessionToken: string }> {
     return this.enqueueRoomOperation(roomId, async () => {
-      const room = this.rooms.get(roomId);
+      let room = this.rooms.get(roomId);
+      if (!room) {
+        room = (await this.recoverRoom(roomId)) || undefined;
+      }
       if (!room) {
         throw new Error(`Room ${roomId} not found.`);
       }
@@ -341,7 +384,25 @@ export class RoomManager {
       }
 
       let existingPlayer = room.players.find((p) => p.id === playerId);
-      if (!existingPlayer) {
+      if (existingPlayer) {
+        // SECURITY GATE: Prevent anonymous account/player takeover!
+        // If player already exists in the room, caller MUST provide valid matching session token to re-authenticate.
+        let isAuthorized = false;
+        if (clientSessionToken) {
+          const verified = SessionManager.verifySessionToken(clientSessionToken);
+          if (verified && verified.playerId === playerId && verified.roomId === roomId) {
+            isAuthorized = true;
+          }
+        }
+        // Also allow idempotent retransmissions of the same commandId
+        if (commandContext && room.processedCommandIds?.has(commandContext.commandId)) {
+          isAuthorized = true;
+        }
+
+        if (!isAuthorized) {
+          throw new Error(`Player ID '${playerId}' is already claimed in room ${roomId}. Valid session token required.`);
+        }
+      } else {
         const candidatePlayer: PlayerEngineState = {
           id: playerId,
           name: playerName,
@@ -369,12 +430,14 @@ export class RoomManager {
 
         const candidateSequence = room.sequenceNumber + 1;
         const joinPayload = { playerId, playerName };
-        const signature = signGameEvent(room.roomId, candidateSequence, "PLAYER_JOINED", joinPayload);
+        const eventId = uuidv7();
+        const timestamp = Date.now();
+        const signature = signGameEvent(room.roomId, candidateSequence, "PLAYER_JOINED", joinPayload, eventId, timestamp, playerId);
         const joinEvent: GameEvent = {
-          eventId: uuidv7(),
+          eventId,
           roomId: room.roomId,
           sequence: candidateSequence,
-          timestamp: Date.now(),
+          timestamp,
           type: "PLAYER_JOINED",
           actorId: playerId,
           payload: joinPayload,
@@ -443,36 +506,147 @@ export class RoomManager {
     playerId: string,
     commandContext?: CommandRecord
   ): Promise<AuthoritativeRoomState> {
-    const room = this.rooms.get(roomId);
-    if (!room) throw new Error(`Room ${roomId} not found.`);
-    if (room.phase !== "LOBBY") throw new Error("Ready state can only be toggled in LOBBY.");
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) throw new Error(`Room ${roomId} not found.`);
+      if (room.phase !== "LOBBY") throw new Error("Ready state can only be toggled in LOBBY.");
 
-    const player = room.players.find((p) => p.id === playerId);
-    if (!player) throw new Error(`Player ${playerId} not found in room.`);
+      const player = room.players.find((p) => p.id === playerId);
+      if (!player) throw new Error(`Player ${playerId} not found in room.`);
 
-    const newReadyState = !player.isReady;
+      const newReadyState = !player.isReady;
 
-    // 1. AWAIT database append first (strict historical truth before RAM commit)
-    const { isDuplicate } = await this.appendEvent(
-      room,
-      "PLAYER_READY_CHANGED",
-      playerId,
-      {
+      // 1. AWAIT database append first (strict historical truth before RAM commit)
+      const { isDuplicate } = await this.appendEvent(
+        room,
+        "PLAYER_READY_CHANGED",
         playerId,
-        isReady: newReadyState,
-      },
-      commandContext
-    );
+        {
+          playerId,
+          isReady: newReadyState,
+        },
+        commandContext
+      );
 
-    // If duplicate command retransmission, NO-OP: return current state without mutation
-    if (isDuplicate) {
+      // If duplicate command retransmission, NO-OP: return current state without mutation
+      if (isDuplicate) {
+        return room;
+      }
+
+      // 2. Only upon successful persistence commit, update authoritative state in RAM
+      player.isReady = newReadyState;
+      room.updatedAt = Date.now();
       return room;
-    }
+    });
+  }
 
-    // 2. Only upon successful persistence commit, update authoritative state in RAM
-    player.isReady = newReadyState;
-    room.updatedAt = Date.now();
-    return room;
+  /**
+   * Updates room configuration during LOBBY phase.
+   * Emits ROOM_CONFIG_UPDATED event to EventStore before mutating RAM state.
+   */
+  public static async updateRoomConfig(
+    roomId: string,
+    hostPlayerId: string,
+    config: {
+      gameMode?: AuthoritativeRoomState["gameMode"];
+      targetPlayerCount?: number;
+      selectedRoles?: SelectedRole[];
+      selectedRolePool?: string[];
+    },
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) throw new Error(`Room ${roomId} not found.`);
+      if (room.phase !== "LOBBY") {
+        throw new Error("Room configuration can only be updated in LOBBY phase.");
+      }
+      if (room.hostPlayerId !== hostPlayerId) {
+        throw new Error("Only the host can update room configuration.");
+      }
+
+      if (config.targetPlayerCount !== undefined) {
+        if (!Number.isInteger(config.targetPlayerCount) || config.targetPlayerCount < MINIMUM_PLAYERS) {
+          throw new Error(`targetPlayerCount must be an integer >= ${MINIMUM_PLAYERS}.`);
+        }
+        if (config.targetPlayerCount < room.players.length) {
+          throw new Error(
+            `Jumlah pemain target (${config.targetPlayerCount}) tidak boleh lebih kecil dari jumlah pemain yang sudah bergabung (${room.players.length}).`
+          );
+        }
+      }
+
+      if (config.selectedRoles !== undefined) {
+        if (!Array.isArray(config.selectedRoles)) {
+          throw new Error("selectedRoles must be an array.");
+        }
+        for (const sel of config.selectedRoles) {
+          if (!sel.role_id || !ROLE_BY_ID.has(sel.role_id)) {
+            throw new Error(`Invalid role_id in selectedRoles: ${sel.role_id}`);
+          }
+          if (!Number.isInteger(sel.count) || sel.count <= 0) {
+            throw new Error(`Invalid role count for ${sel.role_id}: must be a positive integer.`);
+          }
+        }
+      }
+
+      if (config.selectedRolePool !== undefined) {
+        if (!Array.isArray(config.selectedRolePool) || config.selectedRolePool.length === 0) {
+          throw new Error("selectedRolePool must be a non-empty array of role IDs.");
+        }
+        const uniqueIds = new Set<string>();
+        for (const id of config.selectedRolePool) {
+          if (!ROLE_BY_ID.has(id)) {
+            throw new Error(`Invalid role ID in pool: ${id}`);
+          }
+          if (uniqueIds.has(id)) {
+            throw new Error(`Duplicate role ID in pool: ${id}`);
+          }
+          uniqueIds.add(id);
+        }
+        const poolRoles: SelectedRole[] = config.selectedRolePool.map((id) => ({
+          role_id: id,
+          canonical_name: ROLE_BY_ID.get(id)!.canonical_name,
+          count: 1,
+        }));
+        const val = validateMode2Pool(poolRoles);
+        if (!val.valid) {
+          throw new Error(val.error || "Invalid role pool: must contain at least 1 werewolf-side role.");
+        }
+      }
+
+      const payload = {
+        gameMode: config.gameMode,
+        targetPlayerCount: config.targetPlayerCount,
+        selectedRoles: config.selectedRoles,
+        selectedRolePool: config.selectedRolePool,
+      };
+
+      // 1. AWAIT PostgreSQL persistence commit first
+      const { isDuplicate } = await this.appendEvent(
+        room,
+        "ROOM_CONFIG_UPDATED",
+        hostPlayerId,
+        payload,
+        commandContext
+      );
+
+      if (isDuplicate) {
+        return room;
+      }
+
+      // 2. Mutate RAM state only after database confirms commit
+      if (config.gameMode) room.gameMode = config.gameMode;
+      if (config.targetPlayerCount !== undefined) room.targetPlayerCount = config.targetPlayerCount;
+      if (config.selectedRoles !== undefined) room.selectedRoles = config.selectedRoles;
+      if (config.selectedRolePool !== undefined) room.selectedRolePool = config.selectedRolePool;
+      room.updatedAt = Date.now();
+
+      // 3. Broadcast sync to all clients in room
+      FogOfWarDispatcher.dispatchRoomSync(room);
+
+      return room;
+    });
   }
 
   /**
@@ -488,147 +662,260 @@ export class RoomManager {
     },
     commandContext?: CommandRecord
   ): Promise<AuthoritativeRoomState> {
-    const room = this.rooms.get(roomId);
-    if (!room) throw new Error(`Room ${roomId} not found.`);
-    if (room.phase !== "LOBBY") throw new Error(`Cannot start game from phase ${room.phase}.`);
-    if (room.hostPlayerId !== hostPlayerId) {
-      throw new Error("Only the host can start the game.");
-    }
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) throw new Error(`Room ${roomId} not found.`);
+      if (room.phase !== "LOBBY") throw new Error(`Cannot start game from phase ${room.phase}.`);
+      if (room.hostPlayerId !== hostPlayerId) {
+        throw new Error("Only the host can start the game.");
+      }
 
-    const playerCount = room.players.length;
-    if (playerCount < MINIMUM_PLAYERS) {
-      throw new Error(`Minimum ${MINIMUM_PLAYERS} players required to start.`);
-    }
+      const playerCount = room.players.length;
+      if (playerCount < MINIMUM_PLAYERS) {
+        throw new Error(`Minimum ${MINIMUM_PLAYERS} players required to start.`);
+      }
 
-    // Role Distribution Logic according to game mode
-    let assignedRoleDefs: typeof ALL_ROLES = [];
+      // Role Distribution Logic according to game mode
+      let assignedRoleDefs: typeof ALL_ROLES = [];
 
-    if (options?.fixedRoles && options.fixedRoles.length > 0) {
-      const expanded: typeof ALL_ROLES = [];
-      for (const sel of options.fixedRoles) {
-        const def = ROLE_BY_ID.get(sel.role_id);
-        if (def) {
+      const effectiveFixedRoles = options?.fixedRoles || room.selectedRoles;
+      const effectiveRolePool = options?.selectedRolePool || room.selectedRolePool;
+
+      if (effectiveFixedRoles && effectiveFixedRoles.length > 0 && room.gameMode === "MODE_1_FIXED") {
+        for (const sel of effectiveFixedRoles) {
+          if (!Number.isInteger(sel.count) || sel.count <= 0) {
+            throw new Error(`Invalid role count for ${sel.role_id}: must be a positive integer.`);
+          }
+        }
+        const totalFixedCount = effectiveFixedRoles.reduce((sum, sel) => sum + sel.count, 0);
+        if (totalFixedCount !== playerCount) {
+          throw new Error(
+            `Cannot start game: Total fixed role count (${totalFixedCount}) must exactly match player count (${playerCount}).`
+          );
+        }
+        const expanded: typeof ALL_ROLES = [];
+        for (const sel of effectiveFixedRoles) {
+          const def = ROLE_BY_ID.get(sel.role_id);
+          if (!def) {
+            throw new Error(`Role definition not found for role_id: ${sel.role_id}`);
+          }
           for (let i = 0; i < sel.count; i++) expanded.push(def);
         }
+        assignedRoleDefs = shuffleRoles(expanded);
+      } else if (room.gameMode === "MODE_2_POOL" && effectiveRolePool && effectiveRolePool.length > 0) {
+        for (const id of effectiveRolePool) {
+          if (!ROLE_BY_ID.has(id)) {
+            throw new Error(`Invalid role pool: unknown role ID ${id}`);
+          }
+        }
+        const poolRoles: SelectedRole[] = effectiveRolePool.map((id) => {
+          const def = ROLE_BY_ID.get(id)!;
+          return {
+            role_id: id,
+            canonical_name: def.canonical_name,
+            count: 1,
+          };
+        });
+        assignedRoleDefs = selectBalancedSubsetFromPool(poolRoles, playerCount);
+      } else if (effectiveFixedRoles && effectiveFixedRoles.length > 0) {
+        for (const sel of effectiveFixedRoles) {
+          if (!Number.isInteger(sel.count) || sel.count <= 0) {
+            throw new Error(`Invalid role count for ${sel.role_id}: must be a positive integer.`);
+          }
+        }
+        const totalFixedCount = effectiveFixedRoles.reduce((sum, sel) => sum + sel.count, 0);
+        if (totalFixedCount !== playerCount) {
+          throw new Error(
+            `Cannot start game: Total fixed role count (${totalFixedCount}) must exactly match player count (${playerCount}).`
+          );
+        }
+        const expanded: typeof ALL_ROLES = [];
+        for (const sel of effectiveFixedRoles) {
+          const def = ROLE_BY_ID.get(sel.role_id);
+          if (!def) {
+            throw new Error(`Role definition not found for role_id: ${sel.role_id}`);
+          }
+          for (let i = 0; i < sel.count; i++) expanded.push(def);
+        }
+        assignedRoleDefs = shuffleRoles(expanded);
+      } else {
+        assignedRoleDefs = generateBalancedRandomComposition(playerCount);
       }
-      assignedRoleDefs = shuffleRoles(expanded);
-    } else if (room.gameMode === "MODE_2_POOL" && options?.selectedRolePool) {
-      const poolRoles: SelectedRole[] = options.selectedRolePool.map((id) => {
-        const def = ROLE_BY_ID.get(id);
+
+      // PURE CANDIDATE COMPUTATION: Zero RAM mutation before persistence commit!
+      const candidatePlayers: PlayerEngineState[] = room.players.map((p, idx) => {
+        const role = assignedRoleDefs[idx] || ALL_ROLES[0];
         return {
-          role_id: id,
-          canonical_name: def?.canonical_name || "Unknown",
-          count: 1,
+          ...p,
+          role_id: role.role_id,
+          canonical_name: role.canonical_name,
+          team: role.team,
+          originalTeam: role.team,
+          category: role.category,
+          seer_result: role.seer_result,
+          role_points: role.role_points,
+          balance_weight: role.balance_weight,
+          night_priority: role.night_priority || 50,
+          active_phase: role.active_phase,
+          action_type: role.action_type,
+          trigger: role.trigger,
+          target_type: role.target_type,
+          usage_limit: role.usage_limit,
+          can_change_role: role.can_change_role,
+          reveal_on_death: role.reveal_on_death,
+          requires_engine_resolution: role.requires_engine_resolution,
+          description_id: role.description_id || role.tooltip_id,
+          tooltip_id: role.tooltip_id,
+          alive: true,
+          protected: false,
+          silenced: false,
+          inCult: false,
+          hasUsedAbility: false,
         };
       });
-      assignedRoleDefs = selectBalancedSubsetFromPool(poolRoles, playerCount);
-    } else {
-      assignedRoleDefs = generateBalancedRandomComposition(playerCount);
-    }
 
-    // PURE CANDIDATE COMPUTATION: Zero RAM mutation before persistence commit!
-    const candidatePlayers: PlayerEngineState[] = room.players.map((p, idx) => {
-      const role = assignedRoleDefs[idx] || ALL_ROLES[0];
-      return {
-        ...p,
-        role_id: role.role_id,
-        canonical_name: role.canonical_name,
-        team: role.team,
-        originalTeam: role.team,
-        category: role.category,
-        seer_result: role.seer_result,
-        role_points: role.role_points,
-        balance_weight: role.balance_weight,
-        night_priority: role.night_priority || 50,
-        active_phase: role.active_phase,
-        action_type: role.action_type,
-        trigger: role.trigger,
-        target_type: role.target_type,
-        usage_limit: role.usage_limit,
-        can_change_role: role.can_change_role,
-        reveal_on_death: role.reveal_on_death,
-        requires_engine_resolution: role.requires_engine_resolution,
-        description_id: role.description_id || role.tooltip_id,
-        tooltip_id: role.tooltip_id,
-        alive: true,
-        protected: false,
-        silenced: false,
-        inCult: false,
-        hasUsedAbility: false,
-      };
-    });
+      const candidateNightCount = 1;
+      const candidateDayCount = 0;
+      const candidatePhase: AuthoritativeRoomState["phase"] = "NIGHT_ACTIVE";
+      const candidateNightActions = buildEngineNightActions(candidatePlayers, candidateNightCount, false);
 
-    const candidateNightCount = 1;
-    const candidateDayCount = 0;
-    const candidatePhase: AuthoritativeRoomState["phase"] = "NIGHT_ACTIVE";
-    const candidateNightActions = buildEngineNightActions(candidatePlayers, candidateNightCount, false);
+      const now = Date.now();
+      const DURATION = 10000;
+      const eligibleWolves = candidatePlayers.filter((p) => p.alive && canParticipateInWerewolfPackVote(p, candidatePlayers, candidateNightCount));
+      const seer = candidatePlayers.find((p) => p.alive && (p.role_id === "ROLE-002" || p.role_id === "ROLE-022" || p.canonical_name?.toLowerCase().includes("seer") || p.action_type === "Investigate"));
 
-    // ATOMIC PERSISTENCE: Commit GAME_STARTED, ROLES_ASSIGNED, and PHASE_TRANSITIONED together
-    // Includes complete canonical role snapshot & ruleset version for immutable long-term replay
-    const { isDuplicate } = await this.appendBatch(room, [
-      {
-        type: "GAME_STARTED",
-        actorId: hostPlayerId,
-        payload: {
-          playerCount,
-          gameMode: room.gameMode,
-          rulesetVersion: "1.0.0",
-          engineVersion: "1.0.0",
+      // ATOMIC PERSISTENCE: Commit GAME_STARTED, ROLES_ASSIGNED, and PHASE_TRANSITIONED together
+      // Includes complete canonical role snapshot & ruleset version for immutable long-term replay
+      const eventsBatch: Array<{ type: GameEventType; actorId?: string; payload: any }> = [
+        {
+          type: "GAME_STARTED",
+          actorId: hostPlayerId,
+          payload: {
+            playerCount,
+            gameMode: room.gameMode,
+            rulesetVersion: "1.0.0",
+            engineVersion: "1.0.0",
+          },
         },
-      },
-      {
-        type: "ROLES_ASSIGNED",
-        actorId: hostPlayerId,
-        payload: {
-          assignedCount: playerCount,
-          rulesetVersion: "1.0.0",
-          assignments: candidatePlayers.map((p) => ({
-            playerId: p.id,
-            role_id: p.role_id,
-            canonical_name: p.canonical_name,
-            team: p.team,
-            originalTeam: p.originalTeam,
-            category: p.category,
-            seer_result: p.seer_result,
-            role_points: p.role_points,
-            balance_weight: p.balance_weight,
-            night_priority: p.night_priority,
-            active_phase: p.active_phase,
-            action_type: p.action_type,
-            trigger: p.trigger,
-            target_type: p.target_type,
-            usage_limit: p.usage_limit,
-            can_change_role: p.can_change_role,
-            reveal_on_death: p.reveal_on_death,
-            requires_engine_resolution: p.requires_engine_resolution,
-            description_id: p.description_id,
-            tooltip_id: p.tooltip_id,
-          })),
+        {
+          type: "ROLES_ASSIGNED",
+          actorId: hostPlayerId,
+          payload: {
+            assignedCount: playerCount,
+            rulesetVersion: "1.0.0",
+            assignments: candidatePlayers.map((p) => ({
+              playerId: p.id,
+              role_id: p.role_id,
+              canonical_name: p.canonical_name,
+              team: p.team,
+              originalTeam: p.originalTeam,
+              category: p.category,
+              seer_result: p.seer_result,
+              role_points: p.role_points,
+              balance_weight: p.balance_weight,
+              night_priority: p.night_priority,
+              active_phase: p.active_phase,
+              action_type: p.action_type,
+              trigger: p.trigger,
+              target_type: p.target_type,
+              usage_limit: p.usage_limit,
+              can_change_role: p.can_change_role,
+              reveal_on_death: p.reveal_on_death,
+              requires_engine_resolution: p.requires_engine_resolution,
+              description_id: p.description_id,
+              tooltip_id: p.tooltip_id,
+            })),
+          },
         },
-      },
-      {
-        type: "PHASE_TRANSITIONED",
-        payload: {
-          phase: candidatePhase,
-          nightCount: candidateNightCount,
-          dayCount: candidateDayCount,
+        {
+          type: "PHASE_TRANSITIONED",
+          payload: {
+            phase: candidatePhase,
+            nightCount: candidateNightCount,
+            dayCount: candidateDayCount,
+          },
         },
-      },
-    ], commandContext);
+      ];
 
-    // If duplicate command retransmission, NO-OP: return current state without mutation
-    if (isDuplicate) {
+      if (eligibleWolves.length > 0) {
+        eventsBatch.push({
+          type: "PACK_VOTE_STARTED",
+          payload: {
+            startedAt: now,
+            expiresAt: now + DURATION,
+            isRevote: false,
+          },
+        });
+      }
+
+      if (seer) {
+        eventsBatch.push({
+          type: "SEER_WINDOW_STARTED",
+          actorId: seer.id,
+          payload: {
+            startedAt: now,
+            expiresAt: now + DURATION,
+            seerPlayerId: seer.id,
+          },
+        });
+      }
+
+      const { isDuplicate } = await this.appendBatch(room, eventsBatch, commandContext);
+
+      // If duplicate command retransmission, NO-OP: return current state without mutation
+      if (isDuplicate) {
+        return room;
+      }
+
+      // ONLY UPON SUCCESSFUL DATABASE BATCH COMMIT: Apply candidate state to RAM!
+      room.players = candidatePlayers;
+      room.nightCount = candidateNightCount;
+      room.dayCount = candidateDayCount;
+      room.phase = candidatePhase;
+      room.nightActions = candidateNightActions;
+
+      // Clear any old timers & reset pack votes
+      if (room.packVoteWindow?.timer) clearTimeout(room.packVoteWindow.timer);
+      if (room.seerActionState?.timer) clearTimeout(room.seerActionState.timer);
+      room.packVotes = {};
+
+      if (eligibleWolves.length > 0) {
+        room.packVoteWindow = {
+          startedAt: now,
+          expiresAt: now + DURATION,
+          isRevote: false,
+          eligibleWolfIds: eligibleWolves.map((w) => w.id),
+          timer: setTimeout(async () => {
+            try {
+              await RoomManager.closePackVoteAndTally(room.roomId);
+            } catch (err) {
+              console.error("Pack vote timer error:", err);
+            }
+          }, DURATION).unref(),
+        };
+      } else {
+        delete room.packVoteWindow;
+      }
+
+      if (seer) {
+        room.seerActionState = {
+          startedAt: now,
+          expiresAt: now + DURATION,
+          checked: false,
+          timer: setTimeout(async () => {
+            try {
+              await RoomManager.closeSeerWindow(room.roomId);
+            } catch (err) {
+              console.error("Seer window timer error:", err);
+            }
+          }, DURATION).unref(),
+        };
+      } else {
+        delete room.seerActionState;
+      }
+
       return room;
-    }
-
-    // ONLY UPON SUCCESSFUL DATABASE BATCH COMMIT: Apply candidate state to RAM!
-    room.players = candidatePlayers;
-    room.nightCount = candidateNightCount;
-    room.dayCount = candidateDayCount;
-    room.phase = candidatePhase;
-    room.nightActions = candidateNightActions;
-
-    return room;
+    });
   }
 
   /**
@@ -657,6 +944,26 @@ export class RoomManager {
       throw new Error(`Action ${actionId || "auto"} not found or actor ${actorPlayerId} unauthorized.`);
     }
 
+    // Validate target existence and alive status if provided
+    if (targetPlayerId) {
+      const target = room.players.find((p) => p.id === targetPlayerId);
+      if (!target) throw new Error(`Target player ${targetPlayerId} not found in room.`);
+      if (!target.alive) throw new Error(`Target player ${targetPlayerId} is dead.`);
+    }
+    if (secondaryTargetId) {
+      const secTarget = room.players.find((p) => p.id === secondaryTargetId);
+      if (!secTarget) throw new Error(`Secondary target player ${secondaryTargetId} not found in room.`);
+      if (!secTarget.alive) throw new Error(`Secondary target player ${secondaryTargetId} is dead.`);
+    }
+
+    const actor = room.players.find((p) => p.id === actorPlayerId);
+    if (actor && targetPlayerId) {
+      const abilityCheck = validateAbilityTarget(action, actor, targetPlayerId, secondaryTargetId);
+      if (!abilityCheck.valid) {
+        throw new Error(abilityCheck.reason || "Invalid ability target.");
+      }
+    }
+
     const effectiveActionId = action.id;
 
     // 1. AWAIT database persistence commit BEFORE mutating action in RAM
@@ -676,14 +983,42 @@ export class RoomManager {
     action.secondary_target_id = secondaryTargetId || null;
     action.completed = true;
 
-    // Check if all actions completed
-    const allCompleted = room.nightActions.every((a) => a.completed);
-    if (allCompleted) {
-      await this.resolveNightPhase(room);
-      return { room, resolved: true };
+    // If wolf action completed, sync pack votes and clear window
+    const isWolfAct =
+      action.role_id === "SYSTEM-WEREWOLF-PACK" ||
+      action.id === "SYSTEM-WEREWOLF-PACK" ||
+      action.role_name.toLowerCase().includes("werewolf") ||
+      action.role_name.toLowerCase().includes("werewolves") ||
+      action.action_type.toLowerCase().includes("werewolf") ||
+      action.action_type === "Kill";
+
+    if (isWolfAct) {
+      if (room.packVoteWindow?.timer) clearTimeout(room.packVoteWindow.timer);
+      delete room.packVoteWindow;
+      if (targetPlayerId) {
+        if (!room.packVotes) room.packVotes = {};
+        room.packVotes[actorPlayerId] = targetPlayerId;
+      }
     }
 
-    return { room, resolved: false };
+    // If seer action completed, sync seerActionState
+    if (action.role_id === "ROLE-002" || action.role_id === "ROLE-022" || action.role_name.toLowerCase().includes("seer") || action.action_type === "Investigate") {
+      if (room.seerActionState) {
+        if (room.seerActionState.timer) clearTimeout(room.seerActionState.timer);
+        room.seerActionState.checked = true;
+        if (targetPlayerId) {
+          room.seerActionState.targetPlayerId = targetPlayerId;
+          const target = room.players.find((p) => p.id === targetPlayerId);
+          if (target) {
+            room.seerActionState.result = (target.seer_result as "Werewolf" | "Villager") || (target.team === "Werewolf" ? "Werewolf" : "Villager");
+          }
+        }
+      }
+    }
+
+    // Check if night can be auto-resolved
+    const resolved = await this.checkNightAutoResolve(room);
+    return { room, resolved };
   }
 
   /**
@@ -691,7 +1026,10 @@ export class RoomManager {
    * STRICT PERSISTENCE INVARIANT:
    * Commits results in an atomic database transaction BEFORE mutating RAM room state.
    */
-  public static async resolveNightPhase(room: AuthoritativeRoomState): Promise<AuthoritativeRoomState> {
+  public static async resolveNightPhase(
+    room: AuthoritativeRoomState,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
     // Pure calculation via Golden Engine: ZERO RAM mutation yet!
     const { updatedPlayers, outcome } = resolveNightActions(
       room.players,
@@ -748,10 +1086,17 @@ export class RoomManager {
       }
     }
 
+    const canonicalWinResult = winResult.gameEnded ? {
+      winner: winResult.winner || "Draw",
+      reason: winResult.reason || "Pertarungan di desa telah mencapai akhir!",
+      winningPlayerIds: winResult.winningPlayerIds,
+      winningTeams: winResult.winningTeams,
+    } : null;
+
     if (winResult.gameEnded) {
       batch.push({
         type: "WIN_CONDITION_SATISFIED",
-        payload: winResult,
+        payload: canonicalWinResult,
       });
     } else {
       batch.push({
@@ -765,14 +1110,29 @@ export class RoomManager {
     }
 
     // 1. PERSIST ATOMIC BATCH TO DB FIRST
-    await this.appendBatch(room, batch);
+    const { isDuplicate } = await this.appendBatch(room, batch, commandContext);
+    if (isDuplicate) {
+      return room;
+    }
 
     // 2. ONLY UPON SUCCESSFUL DB COMMIT: Apply candidate state to RAM!
+    if (room.packVoteWindow?.timer) clearTimeout(room.packVoteWindow.timer);
+    if (room.seerActionState?.timer) clearTimeout(room.seerActionState.timer);
+    delete room.packVoteWindow;
+    delete room.seerActionState;
+    room.packVotes = {};
+
     room.players = candidatePlayers;
     room.dayCount = candidateDayCount;
     room.phase = candidatePhase;
     room.votes = {};
     room.nightActions = [];
+    room.activeWinResult = canonicalWinResult;
+    room.lastNightResult = {
+      killed: deathChain.chainCasualties ? Array.from(new Set([...outcome.killedPlayerIds, ...deathChain.chainCasualties])) : outcome.killedPlayerIds,
+      protected: outcome.savedPlayerIds || [],
+      silenced: outcome.silencedPlayerIds || [],
+    };
 
     return room;
   }
@@ -780,7 +1140,10 @@ export class RoomManager {
   /**
    * Transitions from Day Discussion to Day Voting.
    */
-  public static async startDayVoting(roomId: string): Promise<AuthoritativeRoomState> {
+  public static async startDayVoting(
+    roomId: string,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error(`Room ${roomId} not found.`);
     if (room.phase !== "DAY_DISCUSSION") {
@@ -788,11 +1151,21 @@ export class RoomManager {
     }
 
     // 1. PERSIST TO DB FIRST
-    await this.appendEvent(room, "PHASE_TRANSITIONED", undefined, {
-      phase: "DAY_VOTING",
-      dayCount: room.dayCount,
-      nightCount: room.nightCount,
-    });
+    const { isDuplicate } = await this.appendEvent(
+      room,
+      "PHASE_TRANSITIONED",
+      undefined,
+      {
+        phase: "DAY_VOTING",
+        dayCount: room.dayCount,
+        nightCount: room.nightCount,
+      },
+      commandContext
+    );
+
+    if (isDuplicate) {
+      return room;
+    }
 
     // 2. ONLY AFTER DB COMMIT: Apply to RAM
     room.phase = "DAY_VOTING";
@@ -820,6 +1193,12 @@ export class RoomManager {
     const voter = room.players.find((p) => p.id === voterId);
     if (!voter || !voter.alive) {
       throw new Error(`Voter ${voterId} is dead or does not exist.`);
+    }
+
+    if (targetPlayerId !== "SKIP") {
+      const target = room.players.find((p) => p.id === targetPlayerId);
+      if (!target) throw new Error(`Vote target ${targetPlayerId} not found in room.`);
+      if (!target.alive) throw new Error(`Cannot vote for dead player ${targetPlayerId}.`);
     }
 
     // 1. AWAIT database persistence commit BEFORE updating votes in RAM
@@ -861,10 +1240,11 @@ export class RoomManager {
    */
   public static async resolveDayVotePhase(
     room: AuthoritativeRoomState,
-    isTimeout: boolean = false
+    isTimeout: boolean = false,
+    commandContext?: CommandRecord
   ): Promise<AuthoritativeRoomState> {
     const candidateTimeoutCount = isTimeout ? room.timeoutCount + 1 : room.timeoutCount;
-    const batch: Array<{ type: GameEventType; payload: any }> = [];
+    const batch: Array<{ type: GameEventType; payload: any; actorId?: string }> = [];
 
     if (isTimeout) {
       batch.push({
@@ -895,6 +1275,8 @@ export class RoomManager {
       type: "VOTE_RESOLVED",
       payload: {
         tally: outcome.tally,
+        topTargetId: outcome.topTargetId,
+        isTie: outcome.isTie,
         eliminatedPlayerId: outcome.eliminatedPlayer?.id || null,
         princeSurvived: outcome.princeSurvived,
         tannerWon: outcome.tannerWon,
@@ -907,11 +1289,18 @@ export class RoomManager {
     let candidateNightCount = room.nightCount;
     let candidateNightActions: EngineNightAction[] = [];
 
+    const canonicalWinResult = winResult.gameEnded ? {
+      winner: winResult.winner || "Draw",
+      reason: winResult.reason || "Pertarungan di desa telah mencapai akhir!",
+      winningPlayerIds: winResult.winningPlayerIds,
+      winningTeams: winResult.winningTeams,
+    } : null;
+
     if (winResult.gameEnded) {
       candidatePhase = "GAME_OVER";
       batch.push({
         type: "WIN_CONDITION_SATISFIED",
-        payload: winResult,
+        payload: canonicalWinResult,
       });
     } else {
       candidatePhase = "NIGHT_ACTIVE";
@@ -927,16 +1316,93 @@ export class RoomManager {
       });
     }
 
+    const now = Date.now();
+    const DURATION = 10000;
+    const eligibleWolves = candidatePhase === "NIGHT_ACTIVE"
+      ? finalPlayers.filter((p) => p.alive && canParticipateInWerewolfPackVote(p, finalPlayers, candidateNightCount))
+      : [];
+    const seer = candidatePhase === "NIGHT_ACTIVE"
+      ? finalPlayers.find((p) => p.alive && (p.role_id === "ROLE-002" || p.role_id === "ROLE-022" || p.canonical_name?.toLowerCase().includes("seer") || p.action_type === "Investigate"))
+      : undefined;
+
+    if (candidatePhase === "NIGHT_ACTIVE") {
+      if (eligibleWolves.length > 0) {
+        batch.push({
+          type: "PACK_VOTE_STARTED",
+          payload: {
+            startedAt: now,
+            expiresAt: now + DURATION,
+            isRevote: false,
+          },
+        });
+      }
+
+      if (seer) {
+        batch.push({
+          type: "SEER_WINDOW_STARTED",
+          actorId: seer.id,
+          payload: {
+            startedAt: now,
+            expiresAt: now + DURATION,
+            seerPlayerId: seer.id,
+          },
+        });
+      }
+    }
+
     // 1. PERSIST ATOMIC BATCH TO DB FIRST
-    await this.appendBatch(room, batch);
+    const { isDuplicate } = await this.appendBatch(room, batch, commandContext);
+    if (isDuplicate) {
+      return room;
+    }
 
     // 2. ONLY UPON SUCCESSFUL DB COMMIT: Apply candidate state to RAM!
+    if (room.packVoteWindow?.timer) clearTimeout(room.packVoteWindow.timer);
+    if (room.seerActionState?.timer) clearTimeout(room.seerActionState.timer);
+    delete room.packVoteWindow;
+    delete room.seerActionState;
+    room.packVotes = {};
+
     room.timeoutCount = candidateTimeoutCount;
     room.players = finalPlayers;
     room.phase = candidatePhase;
     room.nightCount = candidateNightCount;
     room.nightActions = candidateNightActions;
     room.votes = {};
+    room.activeWinResult = canonicalWinResult;
+
+    if (candidatePhase === "NIGHT_ACTIVE") {
+      if (eligibleWolves.length > 0) {
+        room.packVoteWindow = {
+          startedAt: now,
+          expiresAt: now + DURATION,
+          isRevote: false,
+          eligibleWolfIds: eligibleWolves.map((w) => w.id),
+          timer: setTimeout(async () => {
+            try {
+              await RoomManager.closePackVoteAndTally(room.roomId);
+            } catch (err) {
+              console.error("Pack vote timer error:", err);
+            }
+          }, DURATION).unref(),
+        };
+      }
+
+      if (seer) {
+        room.seerActionState = {
+          startedAt: now,
+          expiresAt: now + DURATION,
+          checked: false,
+          timer: setTimeout(async () => {
+            try {
+              await RoomManager.closeSeerWindow(room.roomId);
+            } catch (err) {
+              console.error("Seer window timer error:", err);
+            }
+          }, DURATION).unref(),
+        };
+      }
+    }
 
     return room;
   }
@@ -954,19 +1420,38 @@ export class RoomManager {
     if (room.phase !== "GAME_OVER") throw new Error(`Can only restart game from GAME_OVER, current: ${room.phase}`);
     if (room.hostPlayerId !== hostPlayerId) throw new Error("Only the host can restart the game.");
 
-    // 1. Commit PHASE_TRANSITIONED event to DB first
-    await this.appendEvent(room, "PHASE_TRANSITIONED", hostPlayerId, {
+    const resetPlayers = room.players.map((p) => ({
+      playerId: p.id,
+      alive: true,
+      isReady: false,
+      silenced: false,
+      protected: false,
+      inCult: false,
+      hasUsedAbility: false,
+    }));
+
+    // 1. Commit MATCH_RESTARTED event to DB first with complete player reset payload
+    await this.appendEvent(room, "MATCH_RESTARTED", hostPlayerId, {
       phase: "LOBBY",
       dayCount: 0,
       nightCount: 0,
+      resetPlayers,
     }, commandContext);
 
     // 2. Reset RAM room state
+    if (room.packVoteWindow?.timer) clearTimeout(room.packVoteWindow.timer);
+    if (room.seerActionState?.timer) clearTimeout(room.seerActionState.timer);
+    delete room.packVoteWindow;
+    delete room.seerActionState;
+    room.packVotes = {};
+
     room.phase = "LOBBY";
     room.dayCount = 0;
     room.nightCount = 0;
     room.votes = {};
     room.nightActions = [];
+    room.activeWinResult = null;
+    room.lastNightResult = null;
     for (const p of room.players) {
       p.alive = true;
       p.isReady = false;
@@ -1014,10 +1499,20 @@ export class RoomManager {
   /**
    * Handles client socket disconnection with grace period.
    */
-  public static async handleClientDisconnect(roomId: string, playerId: string): Promise<void> {
+  public static async handleClientDisconnect(
+    roomId: string,
+    playerId: string,
+    socketId?: string
+  ): Promise<void> {
     return this.enqueueRoomOperation(roomId, async () => {
       const room = this.rooms.get(roomId);
       if (!room) return;
+
+      const current = room.clients.get(playerId);
+      if (socketId && current && current.socketId !== socketId) {
+        // Obsolete or stale socket from previous session — do NOT evict active reconnected socket
+        return;
+      }
 
       room.clients.delete(playerId);
 
@@ -1069,6 +1564,367 @@ export class RoomManager {
       }
 
       FogOfWarDispatcher.dispatchRoomSync(room);
+    });
+  }
+
+  /**
+   * Checks if all night actions and timed action windows have finished,
+   * automatically resolving the night if so.
+   */
+  public static async checkNightAutoResolve(room: AuthoritativeRoomState): Promise<boolean> {
+    if (room.phase !== "NIGHT_ACTIVE") return false;
+
+    // Do not auto-resolve while pack vote window is active
+    if (room.packVoteWindow) {
+      return false;
+    }
+
+    // Do not auto-resolve while Seer window is open and unexpired
+    if (room.seerActionState && !room.seerActionState.checked && Date.now() < room.seerActionState.expiresAt) {
+      return false;
+    }
+
+    // Check if all actions in nightActions have completed
+    const allCompleted = room.nightActions.every((a) => a.completed);
+    if (allCompleted && room.nightActions.length > 0) {
+      await this.resolveNightPhase(room);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Submits or updates a vote from an eligible werewolf during the pack vote window.
+   * Dynamic: A wolf can change their vote anytime before the 10s window expires.
+   */
+  public static async submitPackVote(
+    roomId: string,
+    voterPlayerId: string,
+    targetPlayerId: string,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) throw new Error(`Room ${roomId} not found.`);
+      if (room.phase !== "NIGHT_ACTIVE") {
+        throw new Error(`Cannot vote in pack: room phase is ${room.phase}, expected NIGHT_ACTIVE.`);
+      }
+      if (!room.packVoteWindow) {
+        throw new Error("Pack voting window is not active.");
+      }
+      if (Date.now() > room.packVoteWindow.expiresAt) {
+        throw new Error("Pack voting window has expired.");
+      }
+
+      const voter = room.players.find((p) => p.id === voterPlayerId);
+      if (!voter || !voter.alive) throw new Error("Voter must be alive.");
+      if (!canParticipateInWerewolfPackVote(voter, room.players, room.nightCount)) {
+        throw new Error("Only eligible werewolves can participate in pack voting.");
+      }
+
+      const target = room.players.find((p) => p.id === targetPlayerId);
+      if (!target || !target.alive) throw new Error("Target must be an alive player.");
+
+      if (room.packVoteWindow.allowedTargets && room.packVoteWindow.allowedTargets.length > 0) {
+        if (!room.packVoteWindow.allowedTargets.includes(targetPlayerId)) {
+          throw new Error("Target is not in the allowed revote candidate pool.");
+        }
+      }
+
+      if (!room.packVotes) room.packVotes = {};
+      const nextVotes = { ...room.packVotes, [voterPlayerId]: targetPlayerId };
+
+      // 1. Commit PACK_VOTE_UPDATED event to DB first
+      const { isDuplicate } = await this.appendEvent(
+        room,
+        "PACK_VOTE_UPDATED",
+        voterPlayerId,
+        {
+          voterPlayerId,
+          targetPlayerId,
+          votes: nextVotes,
+        },
+        commandContext
+      );
+
+      if (isDuplicate) return room;
+
+      // 2. Commit to RAM
+      room.packVotes[voterPlayerId] = targetPlayerId;
+      room.updatedAt = Date.now();
+
+      FogOfWarDispatcher.dispatchRoomSync(room);
+      return room;
+    });
+  }
+
+  /**
+   * Authoritatively closes the werewolf pack vote window, tallies votes,
+   * handles ties (triggers 10s revote or deterministic null attack), and updates night action.
+   */
+  public static async closePackVoteAndTally(
+    roomId: string,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room || room.phase !== "NIGHT_ACTIVE" || !room.packVoteWindow) {
+        return room!;
+      }
+
+      if (room.packVoteWindow.timer) {
+        clearTimeout(room.packVoteWindow.timer);
+        delete room.packVoteWindow.timer;
+      }
+
+      const votes = room.packVotes || {};
+      const tally: Record<string, number> = {};
+      for (const [, targetId] of Object.entries(votes)) {
+        if (targetId) {
+          tally[targetId] = (tally[targetId] || 0) + 1;
+        }
+      }
+
+      const entries = Object.entries(tally);
+      let maxVotes = 0;
+      for (const [, count] of entries) {
+        if (count > maxVotes) maxVotes = count;
+      }
+
+      const topCandidates = maxVotes > 0 ? entries.filter(([, count]) => count === maxVotes).map(([id]) => id) : [];
+      const isRevote = room.packVoteWindow.isRevote;
+
+      if (topCandidates.length === 1) {
+        // Clear winner!
+        const resolvedTargetId = topCandidates[0];
+        const batch = [
+          {
+            type: "PACK_VOTE_CLOSED" as GameEventType,
+            payload: { tally, resolvedTargetId },
+          },
+          {
+            type: "PACK_TARGET_RESOLVED" as GameEventType,
+            payload: { targetPlayerId: resolvedTargetId, isTieBreakFailure: false },
+          },
+        ];
+
+        const { isDuplicate } = await this.appendBatch(room, batch, commandContext);
+        if (isDuplicate) return room;
+
+        const wolfAction = room.nightActions.find(
+          (a) =>
+            a.role_id === "SYSTEM-WEREWOLF-PACK" ||
+            a.id === "SYSTEM-WEREWOLF-PACK" ||
+            a.action_type === "Kill" ||
+            a.role_name.toLowerCase().includes("werewolf") ||
+            a.role_name.toLowerCase().includes("werewolves") ||
+            a.action_type.toLowerCase().includes("werewolf")
+        );
+        if (wolfAction) {
+          wolfAction.target_player_id = resolvedTargetId;
+          wolfAction.completed = true;
+        }
+
+        delete room.packVoteWindow;
+
+        await this.checkNightAutoResolve(room);
+        FogOfWarDispatcher.dispatchRoomSync(room);
+        return room;
+      } else if (topCandidates.length > 1 && !isRevote) {
+        // Tie on initial vote -> Launch 10s revote restricted strictly to tied targets!
+        const now = Date.now();
+        const DURATION = 10000;
+        const revotePayload = {
+          startedAt: now,
+          expiresAt: now + DURATION,
+          allowedTargets: topCandidates,
+        };
+
+        const { isDuplicate } = await this.appendEvent(
+          room,
+          "PACK_REVOTE_STARTED",
+          undefined,
+          revotePayload,
+          commandContext
+        );
+        if (isDuplicate) return room;
+
+        // Reset votes for revote
+        room.packVotes = {};
+        const eligibleWolfIds = room.packVoteWindow.eligibleWolfIds;
+        room.packVoteWindow = {
+          startedAt: now,
+          expiresAt: now + DURATION,
+          isRevote: true,
+          allowedTargets: topCandidates,
+          eligibleWolfIds,
+          timer: setTimeout(async () => {
+            try {
+              await RoomManager.closePackVoteAndTally(roomId);
+            } catch (err) {
+              console.error("Revote timer error:", err);
+            }
+          }, DURATION).unref(),
+        };
+
+        FogOfWarDispatcher.dispatchRoomSync(room);
+        return room;
+      } else {
+        // Either:
+        // 1. Tie after revote (isRevote === true)
+        // 2. Zero votes cast (topCandidates.length === 0)
+        // DETERMINISTIC RULE: No Werewolf attack that night! (targetPlayerId: null)
+        const isTieFailure = topCandidates.length > 1 && isRevote;
+        const batch = [
+          {
+            type: "PACK_VOTE_CLOSED" as GameEventType,
+            payload: { tally, resolvedTargetId: null },
+          },
+          {
+            type: "PACK_TARGET_RESOLVED" as GameEventType,
+            payload: { targetPlayerId: null, isTieBreakFailure: isTieFailure },
+          },
+        ];
+
+        const { isDuplicate } = await this.appendBatch(room, batch, commandContext);
+        if (isDuplicate) return room;
+
+        const wolfAction = room.nightActions.find(
+          (a) =>
+            a.role_id === "SYSTEM-WEREWOLF-PACK" ||
+            a.id === "SYSTEM-WEREWOLF-PACK" ||
+            a.action_type === "Kill" ||
+            a.role_name.toLowerCase().includes("werewolf") ||
+            a.role_name.toLowerCase().includes("werewolves") ||
+            a.action_type.toLowerCase().includes("werewolf")
+        );
+        if (wolfAction) {
+          wolfAction.target_player_id = null;
+          wolfAction.completed = true;
+        }
+
+        delete room.packVoteWindow;
+
+        await this.checkNightAutoResolve(room);
+        FogOfWarDispatcher.dispatchRoomSync(room);
+        return room;
+      }
+    });
+  }
+
+  /**
+   * Submits a single authoritative Seer check (max 1 check per night).
+   */
+  public static async submitSeerCheck(
+    roomId: string,
+    seerPlayerId: string,
+    targetPlayerId: string,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room) throw new Error(`Room ${roomId} not found.`);
+      if (room.phase !== "NIGHT_ACTIVE") {
+        throw new Error(`Cannot perform seer check: room phase is ${room.phase}, expected NIGHT_ACTIVE.`);
+      }
+      if (!room.seerActionState) {
+        throw new Error("Seer check window is not active.");
+      }
+      if (room.seerActionState.checked) {
+        throw new Error("Seer has already performed their check for tonight.");
+      }
+      if (Date.now() > room.seerActionState.expiresAt) {
+        throw new Error("Seer check window has expired.");
+      }
+
+      const seer = room.players.find((p) => p.id === seerPlayerId);
+      if (!seer || !seer.alive) throw new Error("Seer must be alive.");
+      const isSeerRole =
+        seer.role_id === "ROLE-002" ||
+        seer.role_id === "ROLE-022" ||
+        seer.canonical_name?.toLowerCase().includes("seer") ||
+        seer.action_type === "Investigate";
+      if (!isSeerRole) throw new Error("Only the Seer can perform a seer check.");
+
+      if (targetPlayerId === seerPlayerId) {
+        throw new Error("Seer cannot check themselves.");
+      }
+      const target = room.players.find((p) => p.id === targetPlayerId);
+      if (!target || !target.alive) throw new Error("Target must be an alive player.");
+
+      const result: "Werewolf" | "Villager" = (target.seer_result as "Werewolf" | "Villager") || (target.team === "Werewolf" ? "Werewolf" : "Villager");
+
+      if (room.seerActionState.timer) {
+        clearTimeout(room.seerActionState.timer);
+        delete room.seerActionState.timer;
+      }
+
+      // 1. Commit SEER_CHECK_RESOLVED event to DB first
+      const { isDuplicate } = await this.appendEvent(
+        room,
+        "SEER_CHECK_RESOLVED",
+        seerPlayerId,
+        {
+          seerPlayerId,
+          targetPlayerId,
+          result,
+        },
+        commandContext
+      );
+
+      if (isDuplicate) return room;
+
+      // 2. Commit to RAM
+      room.seerActionState.checked = true;
+      room.seerActionState.targetPlayerId = targetPlayerId;
+      room.seerActionState.result = result;
+
+      // Update Seer's night action in nightActions
+      const seerAction = room.nightActions.find(
+        (a) => a.action_type === "Investigate" || a.role_id === "ROLE-002" || a.role_id === "ROLE-022" || a.player_ids.includes(seerPlayerId)
+      );
+      if (seerAction) {
+        seerAction.target_player_id = targetPlayerId;
+        seerAction.completed = true;
+      }
+
+      await this.checkNightAutoResolve(room);
+      FogOfWarDispatcher.dispatchRoomSync(room);
+      return room;
+    });
+  }
+
+  /**
+   * Closes the Seer window when the 10s timer expires.
+   */
+  public static async closeSeerWindow(
+    roomId: string,
+    commandContext?: CommandRecord
+  ): Promise<AuthoritativeRoomState> {
+    return this.enqueueRoomOperation(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room || room.phase !== "NIGHT_ACTIVE" || !room.seerActionState) {
+        return room!;
+      }
+
+      if (room.seerActionState.timer) {
+        clearTimeout(room.seerActionState.timer);
+        delete room.seerActionState.timer;
+      }
+
+      room.seerActionState.checked = true;
+
+      const seerAction = room.nightActions.find(
+        (a) => a.action_type === "Investigate" || a.role_id === "ROLE-002" || a.role_id === "ROLE-022"
+      );
+      if (seerAction) {
+        seerAction.completed = true;
+      }
+
+      await this.checkNightAutoResolve(room);
+      FogOfWarDispatcher.dispatchRoomSync(room);
+      return room;
     });
   }
 }

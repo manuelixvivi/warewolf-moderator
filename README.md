@@ -23,9 +23,8 @@ Platform web permainan **Werewolf** online multipemain tanpa login. Permainan di
   - Suara AI otomatis menggunakan browser Web Speech API bahasa Indonesia.
   - Hasil penyelidikan Seer tampil seketika (real-time) di layar Seer tanpa harus klik next.
   - Bodyguard dilarang melindungi diri sendiri sesuai aturan resmi.
-- **⚡ Multiplayer Real-Time**
-  - Menggunakan WebRTC (PeerJS) untuk konektivitas lintas perangkat dan BroadcastChannel untuk pengujian multi-tab lokal.
-  - Berjalan 100% serverless di Vercel tanpa perlu database berbayar.
+- **⚡ Multiplayer Real-Time (Authoritative Server)**
+  - Menggunakan Authoritative WebSocket Server (WSS) dengan PostgreSQL Event Store, Fog of War state masking, dan ticket-based auth.
 - **📱 Mode 1 Perangkat (Pass & Play)**
   - Opsi bermain di 1 smartphone atau laptop secara bergantian saat berkumpul bersama.
 
@@ -36,8 +35,9 @@ Platform web permainan **Werewolf** online multipemain tanpa login. Permainan di
 - **Framework:** Next.js 16 (App Router)
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS v4 (Gothic Dark Werewolf Theme)
-- **Networking:** PeerJS (WebRTC) + BroadcastChannel
-- **State Management:** Zustand
+- **Networking:** Authoritative WebSocket Server (WSS) + Fog of War Dispatcher
+- **Database / Event Store:** PostgreSQL (pg) + Event Sourcing + Command Idempotency
+- **State Management:** Zustand (Client UI projection)
 - **Speech Engine:** Web Speech API (Voice Synthesis)
 - **Deployment:** Vercel
 

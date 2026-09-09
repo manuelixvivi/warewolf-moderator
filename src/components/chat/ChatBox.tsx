@@ -41,14 +41,14 @@ export default function ChatBox({
 
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() || (!canChat && isDead)) return;
+    if (!inputText.trim() || isDead || !canChat) return;
 
     sendChatMessage(inputText.trim(), channel);
     setInputText("");
   };
 
   const handleQuickPhrase = (phrase: string) => {
-    if (!canChat && isDead) return;
+    if (isDead || !canChat) return;
     sendChatMessage(phrase, channel);
   };
 
@@ -160,7 +160,7 @@ export default function ChatBox({
       </div>
 
       {/* Quick Reaction Chips */}
-      {canChat && (!isDead || channel === "LOBBY") && (
+      {canChat && !isDead && (
         <div className="px-3 py-2 bg-gray-950/40 border-t border-gray-800 flex gap-1.5 overflow-x-auto no-scrollbar">
           {phrases.map((phrase, idx) => (
             <button
@@ -177,7 +177,7 @@ export default function ChatBox({
 
       {/* Chat Input Bar */}
       <div className="p-3 bg-gray-950/80 border-t border-gray-800">
-        {canChat && (!isDead || channel === "LOBBY") ? (
+        {canChat && !isDead ? (
           <form onSubmit={handleSend} className="flex items-center gap-2">
             <input
               type="text"

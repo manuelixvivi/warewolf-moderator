@@ -11,6 +11,8 @@ import {
   BaseCommand,
   SanitizedPublicGameState,
   SanitizedPrivatePlayerState,
+  CanonicalWinResult,
+  SelectedRole,
 } from "../src/contracts";
 import { PlayerEngineState, EngineNightAction } from "../src/lib/engine/types";
 
@@ -38,8 +40,33 @@ export interface AuthoritativeRoomState {
   eventLog: GameEvent[]; // In-memory append-only event store
   clients: Map<string, ConnectedClient>; // playerId -> ConnectedClient
   disconnectTimers: Map<string, NodeJS.Timeout>; // playerId -> grace period timer
+  activeWinResult?: CanonicalWinResult | null;
+  lastNightResult?: {
+    killed: string[];
+    protected: string[];
+    silenced: string[];
+  } | null;
+  targetPlayerCount?: number;
+  selectedRoles?: SelectedRole[];
   selectedRolePool?: string[]; // For Mode 2 pool
   fixedRoles?: string[]; // For Mode 1
+  packVotes?: Record<string, string>; // wolfPlayerId -> targetPlayerId
+  packVoteWindow?: {
+    startedAt: number;
+    expiresAt: number;
+    isRevote: boolean;
+    allowedTargets?: string[];
+    eligibleWolfIds: string[];
+    timer?: NodeJS.Timeout;
+  };
+  seerActionState?: {
+    startedAt: number;
+    expiresAt: number;
+    checked: boolean;
+    targetPlayerId?: string;
+    result?: "Werewolf" | "Villager";
+    timer?: NodeJS.Timeout;
+  };
   processedCommandIds?: Set<string>; // Idempotency tracking: prevents duplicate execution of retransmitted commands
   createdAt: number;
   updatedAt: number;
@@ -56,7 +83,17 @@ export interface SessionTokenPayload {
 export interface CommandValidationResult<T = any> {
   isValid: boolean;
   error?: string;
-  errorCode?: "AUTH_FAILED" | "INVALID_SCHEMA" | "INVALID_PHASE" | "PLAYER_DEAD" | "NOT_PERMITTED" | "DUPLICATE_COMMAND";
+  errorCode?:
+    | "AUTH_FAILED"
+    | "INVALID_SCHEMA"
+    | "INVALID_PHASE"
+    | "PLAYER_DEAD"
+    | "NOT_PERMITTED"
+    | "DUPLICATE_COMMAND"
+    | "INVALID_TARGET"
+    | "INVALID_ROLE_COMPOSITION"
+    | "ACTION_EXPIRED"
+    | "ALREADY_CHECKED";
   isDuplicate?: boolean;
   command?: BaseCommand<T>;
   player?: PlayerEngineState;

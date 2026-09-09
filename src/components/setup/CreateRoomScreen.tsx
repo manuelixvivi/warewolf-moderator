@@ -153,12 +153,11 @@ export default function CreateRoomScreen() {
     if (!canCreate || isSubmitting) return;
     setIsSubmitting(true);
 
-    let selectedRoles: SelectedRole[] = [];
+    let selectedRoles: SelectedRole[] | undefined = undefined;
+    let selectedRolePool: string[] | undefined = undefined;
+    let targetPlayerCount: number | undefined = undefined;
 
-    if (gameMode === "MODE_3_RANDOM") {
-      // Mode 3 has dynamic composition generated upon start for actual players count
-      selectedRoles = [];
-    } else {
+    if (gameMode === "MODE_1_FIXED") {
       selectedRoles = Object.entries(selectedMap)
         .filter(([, count]) => count > 0)
         .map(([role_id, count]) => {
@@ -166,9 +165,20 @@ export default function CreateRoomScreen() {
           return {
             role_id,
             canonical_name: roleData.canonical_name,
-            count: gameMode === "MODE_2_POOL" ? 1 : count,
+            count,
           };
         });
+      targetPlayerCount = totalSelectedRoles;
+    } else if (gameMode === "MODE_2_POOL") {
+      selectedRolePool = Object.entries(selectedMap)
+        .filter(([, count]) => count > 0)
+        .map(([role_id]) => role_id);
+      selectedRoles = undefined;
+      targetPlayerCount = undefined;
+    } else if (gameMode === "MODE_3_RANDOM") {
+      selectedRoles = undefined;
+      selectedRolePool = undefined;
+      targetPlayerCount = undefined;
     }
 
     try {
@@ -177,7 +187,8 @@ export default function CreateRoomScreen() {
         selectedRoles,
         theme,
         gameMode,
-        gameMode === "MODE_1_FIXED" ? totalSelectedRoles : 0
+        targetPlayerCount,
+        selectedRolePool
       );
     } catch (err) {
       console.error(err);

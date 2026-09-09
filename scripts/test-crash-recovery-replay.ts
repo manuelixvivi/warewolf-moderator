@@ -36,6 +36,7 @@ import { resolveNightActions } from "../src/lib/engine/actionResolver";
 import { resolveDeathChain } from "../src/lib/engine/deathResolver";
 import { PlayerEngineState, EngineNightAction } from "../src/lib/engine/types";
 import { signGameEvent } from "../server/config";
+import { SessionManager } from "../server/auth/sessionManager";
 import { AuthoritativeRoomState } from "../server/types";
 
 let passCount = 0;
@@ -1640,15 +1641,15 @@ async function runPhase4VerificationSuite() {
   }
 
   // ------------------------------------------------------------
-  // 16. REQUIREMENT ⑯: COMMAND DISPATCHER JOIN_ROOM SPECIAL AUTH PATH
+  // 16. REQUIREMENT ⑯: JOIN_ROOM BLOCKED ON WSS — REST-ONLY BOOTSTRAP
   // ------------------------------------------------------------
-  console.log("\n--- 16. REQUIREMENT ⑯: COMMAND DISPATCHER JOIN_ROOM SPECIAL AUTH PATH ---");
+  console.log("\n--- 16. REQUIREMENT ⑯: JOIN_ROOM BLOCKED ON WSS — REST-ONLY BOOTSTRAP ---");
   {
     const joinRoomId = "ROOM-REQ-16-JOIN";
     await RoomManager.createRoom("host-alice", "Alice", "MODE_1_FIXED", joinRoomId);
 
-    // Test 1: Brand new player "new-bob" (NOT in room.players) sends JOIN_ROOM
-    const joinCommand = {
+    // Test 1: JOIN_ROOM via WSS must be rejected (no sessionToken bypass)
+    const joinCommandNoToken = {
       commandId: "cmd-join-001",
       roomId: joinRoomId,
       senderId: "new-bob",
@@ -1656,15 +1657,33 @@ async function runPhase4VerificationSuite() {
       payload: { playerName: "Bob" },
       clientTimestamp: Date.now(),
     };
+    const wssJoinResult = await CommandDispatcher.handleCommand(JSON.stringify(joinCommandNoToken));
+    assert(wssJoinResult.success === false, "[Req 16] JOIN_ROOM without sessionToken rejected at WSS boundary");
+    assert(
+      wssJoinResult.errorCode === "INVALID_SCHEMA" || wssJoinResult.errorCode === "NOT_PERMITTED",
+      "[Req 16] Correct error code for WSS JOIN_ROOM attempt"
+    );
 
-    const joinResult = await CommandDispatcher.handleCommand(JSON.stringify(joinCommand));
-    assert(joinResult.success === true, "[Req 16] CommandDispatcher accepted JOIN_ROOM for non-member player");
-    assert(typeof joinResult.sessionToken === "string" && joinResult.sessionToken.length > 0, "[Req 16] SessionToken returned for newly joined player");
+    // Test 2: JOIN_ROOM with a sessionToken is also rejected (WSS is not the join path)
+    const fakeToken = SessionManager.createSessionToken("new-bob", "Bob", joinRoomId, false);
+    const joinCommandWithToken = {
+      commandId: "cmd-join-002",
+      roomId: joinRoomId,
+      senderId: "new-bob",
+      sessionToken: fakeToken,
+      type: "JOIN_ROOM" as const,
+      payload: { playerName: "Bob" },
+      clientTimestamp: Date.now(),
+    };
+    const wssJoinResult2 = await CommandDispatcher.handleCommand(JSON.stringify(joinCommandWithToken));
+    assert(wssJoinResult2.success === false, "[Req 16] JOIN_ROOM with sessionToken also rejected on WSS");
+    assert(wssJoinResult2.errorCode === "NOT_PERMITTED", "[Req 16] Error code is NOT_PERMITTED for WSS JOIN_ROOM");
 
-    const roomAfterJoin = RoomManager.getRoom(joinRoomId)!;
-    assert(roomAfterJoin.players.some((p: PlayerEngineState) => p.id === "new-bob"), "[Req 16] new-bob successfully added to room.players");
+    // Test 3: Correct path — REST RoomManager.joinRoom — still works
+    const { room: updatedRoom } = await RoomManager.joinRoom(joinRoomId, "new-bob", "Bob");
+    assert(updatedRoom.players.some((p: PlayerEngineState) => p.id === "new-bob"), "[Req 16] new-bob successfully added via REST joinRoom path");
 
-    // Test 2: In-game command (e.g. CAST_VOTE) from unknown non-member is rejected
+    // Test 4: In-game command from non-member/invalid token is still rejected
     const nonMemberCommand = {
       commandId: "cmd-vote-intruder",
       roomId: joinRoomId,
@@ -1678,11 +1697,7 @@ async function runPhase4VerificationSuite() {
     assert(rejectResult.success === false, "[Req 16] Non-member command correctly rejected");
     assert(rejectResult.errorCode === "AUTH_FAILED" || rejectResult.errorCode === "NOT_PERMITTED", "[Req 16] Correct security error code returned for non-member");
 
-    // Test 3: Idempotent duplicate JOIN_ROOM retransmission is deduplicated
-    const duplicateJoinResult = await CommandDispatcher.handleCommand(JSON.stringify(joinCommand));
-    assert(duplicateJoinResult.success === true, "[Req 16] Retransmitted JOIN_ROOM deduplicated without error");
-
-    console.log("  ✅ [PASS] [Req 16] CommandDispatcher JOIN_ROOM special authorization path verified 100%!");
+    console.log("  ✅ [PASS] [Req 16] JOIN_ROOM WSS block + REST path verified 100%!");
     passCount++;
   }
 

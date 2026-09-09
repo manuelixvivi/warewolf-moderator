@@ -54,11 +54,12 @@ export interface RoomInfo {
   code: string;
   hostId: string;
   hostName: string;
-  targetPlayerCount: number;
+  targetPlayerCount?: number;
   gameName: string;
   storyTheme: string;
   narrationStyle: string;
-  selectedRoles: SelectedRole[];
+  selectedRoles?: SelectedRole[];
+  selectedRolePool?: string[];
   voiceEnabled: boolean;
   gameMode?: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER";
 }

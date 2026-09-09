@@ -70,15 +70,26 @@ export function canonicalJsonStringify(obj: any): string {
 
 /**
  * Creates an HMAC-SHA256 signature for server-signed GameEvents.
+ * Signs full canonical event identity: (roomId, sequence, eventId, timestamp, type, actorId, payload).
  */
-export function signGameEvent(roomId: string, sequence: number, type: string, payload: any): string {
-  const data = `${roomId}:${sequence}:${type}:${canonicalJsonStringify(payload)}`;
+export function signGameEvent(
+  roomId: string,
+  sequence: number,
+  type: string,
+  payload: any,
+  eventId?: string,
+  timestamp?: number,
+  actorId?: string
+): string {
+  const data = eventId && timestamp
+    ? `${roomId}:${sequence}:${eventId}:${timestamp}:${type}:${actorId || ""}:${canonicalJsonStringify(payload)}`
+    : `${roomId}:${sequence}:${type}:${canonicalJsonStringify(payload)}`;
   return crypto.createHmac("sha256", config.hmacSecret).update(data).digest("hex");
 }
 
 /**
  * Cryptographically audits an HMAC-SHA256 signature for an immutable GameEvent.
- * Detects any payload, sequence, or tampering modification.
+ * Detects any payload, sequence, eventId, timestamp, actorId, or tampering modification.
  */
 export function verifyGameEventSignature(event: {
   roomId: string;
@@ -86,12 +97,37 @@ export function verifyGameEventSignature(event: {
   type: string;
   payload: any;
   serverSignature: string;
+  eventId?: string;
+  timestamp?: number;
+  actorId?: string;
 }): boolean {
   if (!event.serverSignature) return false;
-  const expected = signGameEvent(event.roomId, event.sequence, event.type, event.payload);
+
+  // 1. Verify against enhanced signature format (all metadata signed)
+  if (event.eventId && event.timestamp) {
+    const expectedEnhanced = signGameEvent(
+      event.roomId,
+      event.sequence,
+      event.type,
+      event.payload,
+      event.eventId,
+      event.timestamp,
+      event.actorId
+    );
+    try {
+      const sigBuf = Buffer.from(event.serverSignature, "hex");
+      const expBuf = Buffer.from(expectedEnhanced, "hex");
+      if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+        return true;
+      }
+    } catch {}
+  }
+
+  // 2. Fallback to base signature format for backwards compatibility
+  const expectedBase = signGameEvent(event.roomId, event.sequence, event.type, event.payload);
   try {
     const sigBuf = Buffer.from(event.serverSignature, "hex");
-    const expBuf = Buffer.from(expected, "hex");
+    const expBuf = Buffer.from(expectedBase, "hex");
     if (sigBuf.length !== expBuf.length) return false;
     return crypto.timingSafeEqual(sigBuf, expBuf);
   } catch {

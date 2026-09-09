@@ -29,11 +29,18 @@ interface GameStore extends GameState {
   setPlayerName: (name: string) => void;
   createRoom: (
     hostName: string,
-    selectedRoles: SelectedRole[],
-    theme: string,
+    selectedRoles?: SelectedRole[],
+    theme?: string,
     gameMode?: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER",
-    targetPlayerCount?: number
+    targetPlayerCount?: number,
+    selectedRolePool?: string[]
   ) => Promise<string>;
+  updateRoomConfig: (config: {
+    gameMode?: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER";
+    targetPlayerCount?: number;
+    selectedRoles?: SelectedRole[];
+    selectedRolePool?: string[];
+  }) => void;
   joinRoom: (roomCode: string, playerName: string) => Promise<boolean>;
   leaveRoom: () => void;
   toggleVoice: () => void;
@@ -58,17 +65,21 @@ interface GameStore extends GameState {
   hasSeenCardReveal: boolean;
 }
 
-// Generate random player ID per browser session
+// Generate cryptographically secure player ID per browser session
 function generatePlayerId(): string {
   if (typeof window !== "undefined") {
     let id = sessionStorage.getItem("aspire_player_id");
     if (!id) {
-      id = "p-" + Math.random().toString(36).substring(2, 9);
+      id = typeof crypto !== "undefined" && crypto.randomUUID
+        ? `p-${crypto.randomUUID().substring(0, 8)}`
+        : `p-${Math.random().toString(36).substring(2, 9)}`;
       sessionStorage.setItem("aspire_player_id", id);
     }
     return id;
   }
-  return "p-" + Math.random().toString(36).substring(2, 9);
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? `p-${crypto.randomUUID().substring(0, 8)}`
+    : `p-${Math.random().toString(36).substring(2, 9)}`;
 }
 
 // Generate random room code
@@ -180,16 +191,20 @@ export const useGameStore = create<GameStore>()((set, get) => {
             hostId: hostPlayer?.id || currentRoom.hostId,
             hostName: hostPlayer?.name || currentRoom.hostName,
             gameMode: (publicState.gameMode as any) || currentRoom.gameMode,
+            targetPlayerCount: publicState.targetPlayerCount,
+            selectedRoles: publicState.selectedRoles,
+            selectedRolePool: publicState.selectedRolePool,
           }
         : {
             code: publicState.roomId,
             hostId: hostPlayer?.id || "",
             hostName: hostPlayer?.name || "Host",
-            targetPlayerCount: publicState.players.length,
+            targetPlayerCount: publicState.targetPlayerCount,
             gameName: "ASPIRE: WEREWOLF",
             storyTheme: "Dark Fantasy",
             narrationStyle: "Dramatic",
-            selectedRoles: [],
+            selectedRoles: publicState.selectedRoles,
+            selectedRolePool: publicState.selectedRolePool,
             voiceEnabled: true,
             gameMode: (publicState.gameMode as any) || "MODE_1_FIXED",
           };
@@ -204,6 +219,38 @@ export const useGameStore = create<GameStore>()((set, get) => {
           }
         : null;
 
+      // Safe night resolution summary
+      let updatedLastNightResult = get().lastNightResult;
+      if (publicState.publicNightResult) {
+        updatedLastNightResult = {
+          killed: publicState.publicNightResult.killed || [],
+          protected: publicState.publicNightResult.protected || [],
+          silenced: publicState.publicNightResult.silenced || [],
+          investigated: updatedLastNightResult?.investigated || [],
+          conversions: updatedLastNightResult?.conversions || [],
+          triggered: updatedLastNightResult?.triggered || [],
+          narrative: "",
+        };
+      }
+
+      // Safe night action progress tracking for UI indicators
+      let updatedNightActions = get().nightActions;
+      if (publicState.nightActionProgress) {
+        const { totalEligible, completedCount } = publicState.nightActionProgress;
+        updatedNightActions = Array.from({ length: totalEligible }, (_, i) => ({
+          id: `action-${i}`,
+          role_id: "unknown",
+          role_name: "Peran Malam",
+          player_ids: [],
+          action_type: "unknown",
+          target_player_id: null,
+          priority: 50,
+          completed: i < completedCount,
+        }));
+      } else if (publicState.phase !== "NIGHT_ACTIVE") {
+        updatedNightActions = [];
+      }
+
       set({
         phase: nextPhase,
         players: mappedPlayers,
@@ -212,6 +259,8 @@ export const useGameStore = create<GameStore>()((set, get) => {
         nightCount: publicState.nightCount,
         votes: publicState.votes || {},
         winResult: winRes,
+        nightActions: updatedNightActions,
+        lastNightResult: updatedLastNightResult,
         currentNarrative: publicState.currentNarrative || get().currentNarrative,
       });
     });
@@ -289,20 +338,22 @@ export const useGameStore = create<GameStore>()((set, get) => {
     // ── Host Creates Room (Authoritative HTTP + WSS) ───────────
     createRoom: async (
       hostName: string,
-      selectedRoles: SelectedRole[],
-      theme: string,
+      selectedRoles?: SelectedRole[],
+      theme: string = "Dark Fantasy",
       gameMode: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER" = "MODE_1_FIXED",
-      targetPlayerCount?: number
+      targetPlayerCount?: number,
+      selectedRolePool?: string[]
     ) => {
       const hostId = get().myPlayerId;
       const roomCode = generateRoomCode();
       const targetCount =
-        gameMode === "MODE_3_RANDOM" || gameMode === "MODE_2_POOL"
-          ? (targetPlayerCount || 20)
-          : selectedRoles.reduce((sum, r) => sum + r.count, 0);
+        gameMode === "MODE_1_FIXED"
+          ? (targetPlayerCount || (selectedRoles ? selectedRoles.reduce((sum, r) => sum + r.count, 0) : 0))
+          : undefined;
 
       get().setPlayerName(hostName);
 
+      const poolToSend = selectedRolePool || (gameMode === "MODE_2_POOL" && selectedRoles ? selectedRoles.map((r) => r.role_id) : undefined);
       const netConfig = getNetworkConfig();
       const res = await fetch(`${netConfig.serverHttpUrl}/api/rooms`, {
         method: "POST",
@@ -312,6 +363,9 @@ export const useGameStore = create<GameStore>()((set, get) => {
           hostPlayerName: hostName.trim(),
           gameMode,
           customRoomId: roomCode,
+          targetPlayerCount: targetCount,
+          selectedRoles: gameMode === "MODE_1_FIXED" ? selectedRoles : undefined,
+          selectedRolePool: poolToSend,
         }),
       });
 
@@ -333,7 +387,8 @@ export const useGameStore = create<GameStore>()((set, get) => {
         gameName: "ASPIRE: WEREWOLF",
         storyTheme: theme || "Dark Fantasy",
         narrationStyle: "Dramatic",
-        selectedRoles,
+        selectedRoles: gameMode === "MODE_1_FIXED" ? selectedRoles : undefined,
+        selectedRolePool: poolToSend,
         voiceEnabled: true,
         gameMode,
       };
@@ -398,21 +453,27 @@ export const useGameStore = create<GameStore>()((set, get) => {
         throw new Error(errJson.error || "Gagal bergabung ke room.");
       }
 
-      const { roomId, sessionToken, publicState } = await res.json();
+      const { roomId, playerId: serverPlayerId, sessionToken, publicState } = await res.json();
+      const effectiveMyId = serverPlayerId || myId;
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("aspire_player_id", effectiveMyId);
+      }
+      set({ myPlayerId: effectiveMyId });
 
       // Connect authoritative WebSocket
-      authoritativeWsClient.connect(sessionToken, roomId, myId);
+      authoritativeWsClient.connect(sessionToken, roomId, effectiveMyId);
 
       const hostPlayer = publicState?.players?.find((p: any) => p.isHost);
       const roomInfo: RoomInfo = {
         code: roomId,
         hostId: hostPlayer?.id || "",
         hostName: hostPlayer?.name || "Host",
-        targetPlayerCount: publicState?.players?.length || 8,
+        targetPlayerCount: publicState?.targetPlayerCount,
         gameName: "ASPIRE: WEREWOLF",
         storyTheme: "Dark Fantasy",
         narrationStyle: "Dramatic",
-        selectedRoles: [],
+        selectedRoles: publicState?.selectedRoles,
+        selectedRolePool: publicState?.selectedRolePool,
         voiceEnabled: true,
         gameMode: publicState?.gameMode || "MODE_1_FIXED",
       };
@@ -455,11 +516,30 @@ export const useGameStore = create<GameStore>()((set, get) => {
       const { room, myPlayerId } = get();
       if (!room || myPlayerId !== room.hostId) return;
 
-      authoritativeWsClient.sendCommand("START_GAME", {
-        fixedRoles: room.selectedRoles,
-        selectedRolePool: room.selectedRoles.map((r) => r.role_id),
-      }).catch((err) => {
+      const payload: any = {};
+      if (room.gameMode === "MODE_1_FIXED") {
+        payload.fixedRoles = room.selectedRoles;
+      } else if (room.gameMode === "MODE_2_POOL") {
+        payload.selectedRolePool = room.selectedRolePool || (room.selectedRoles ? room.selectedRoles.map((r) => r.role_id) : []);
+      }
+
+      authoritativeWsClient.sendCommand("START_GAME", payload).catch((err) => {
         alert(err.message || "Gagal memulai permainan.");
+      });
+    },
+
+    // ── Host Updates Room Config (Authoritative Command) ──────
+    updateRoomConfig: (config: {
+      gameMode?: "MODE_1_FIXED" | "MODE_2_POOL" | "MODE_3_RANDOM" | "MODERATOR_HELPER";
+      targetPlayerCount?: number;
+      selectedRoles?: SelectedRole[];
+      selectedRolePool?: string[];
+    }) => {
+      const { room, myPlayerId } = get();
+      if (!room || myPlayerId !== room.hostId) return;
+
+      authoritativeWsClient.sendCommand("UPDATE_ROOM_CONFIG", config).catch((err) => {
+        console.error("Failed to update room config:", err);
       });
     },
 
@@ -556,6 +636,9 @@ export const useGameStore = create<GameStore>()((set, get) => {
 
     // ── Send Chat Message (Authoritative Command) ──────────────
     sendChatMessage: (text: string, channel = "DAY_PUBLIC") => {
+      const myId = get().myPlayerId;
+      const me = get().players.find((p) => p.id === myId);
+      if (me && !me.alive) return;
       if (!text.trim()) return;
       authoritativeWsClient.sendCommand("SEND_CHAT", {
         text: text.trim(),

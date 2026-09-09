@@ -125,7 +125,7 @@ export class AuthoritativeWebSocketClient {
     this.initiateSocket();
   }
 
-  private initiateSocket(): void {
+  private async initiateSocket(): Promise<void> {
     if (typeof WebSocket === "undefined") {
       return; // Non-browser environment
     }
@@ -135,8 +135,31 @@ export class AuthoritativeWebSocketClient {
       this.socket = null;
     }
 
-    const wsUrl = `${this.serverWsUrl}?roomId=${encodeURIComponent(this.roomId)}&token=${encodeURIComponent(this.sessionToken)}`;
-    
+    // Exchange the long-lived sessionToken for a short-lived single-use ticket.
+    // This keeps the JWT out of browser access logs / proxy logs.
+    let ticket: string;
+    try {
+      const res = await fetch("/api/auth/ws-ticket", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionToken: this.sessionToken }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        this.notifyError({ message: (body as any).error || "Failed to obtain WS ticket." });
+        this.scheduleReconnect();
+        return;
+      }
+      const body = await res.json();
+      ticket = body.ticket;
+    } catch (err: any) {
+      this.notifyError({ message: err.message || "Failed to obtain WS ticket." });
+      this.scheduleReconnect();
+      return;
+    }
+
+    const wsUrl = `${this.serverWsUrl}?ticket=${encodeURIComponent(ticket)}`;
+
     try {
       this.socket = new WebSocket(wsUrl);
 
@@ -213,7 +236,7 @@ export class AuthoritativeWebSocketClient {
       throw new Error("Cannot send command: WebSocket is not connected to authoritative server.");
     }
 
-    const commandId = "cmd-" + Math.random().toString(36).substring(2, 9);
+    const commandId = "cmd-" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9));
     const clientTimestamp = Date.now();
 
     const command: BaseCommand<T> = {
@@ -301,6 +324,30 @@ export class AuthoritativeWebSocketClient {
 
       case "CHAT_MESSAGE": {
         this.notifyChatMessage(message.message);
+        break;
+      }
+
+      case "RECONNECT_SYNC": {
+        const sync = message.sync as ReconnectSyncResponse;
+        if (sync) {
+          if (sync.publicState) {
+            if (sync.publicState.sequenceNumber >= this.lastKnownSequence) {
+              this.lastKnownSequence = sync.publicState.sequenceNumber;
+            }
+            this.notifyPublicState(sync.publicState);
+          }
+          if (sync.privateState) {
+            this.notifyPrivateState(sync.privateState);
+          }
+          if (Array.isArray(sync.missedEvents)) {
+            for (const ev of sync.missedEvents) {
+              if (ev.sequence >= this.lastKnownSequence) {
+                this.lastKnownSequence = ev.sequence;
+              }
+              this.notifyEvent(ev);
+            }
+          }
+        }
         break;
       }
 

@@ -118,6 +118,81 @@ export function canPlayerActInNight(
 }
 
 /**
+ * Authoritative Golden Engine helper: determines if a player is eligible to
+ * participate in the Werewolf pack vote for a given night.
+ * Rules:
+ * - Must be alive
+ * - Team or category must be Werewolf / Werewolf-aligned / Solo Werewolf
+ * - Excludes auxiliary roles that do not participate in pack kill (e.g. Minion / Sorcerer: action_type 'Find Seer' or 'Support Werewolves')
+ * - Fang Face (ROLE-061): wakes with pack on Night 1; on subsequent nights, only wakes if sole surviving werewolf
+ */
+export function canParticipateInWerewolfPackVote(
+  player: { id: string; role_id: string; team?: string; category?: string; action_type?: string; alive?: boolean },
+  allPlayers: Array<{ id: string; role_id: string; team?: string; category?: string; action_type?: string; alive?: boolean }>,
+  nightCount: number = 1
+): boolean {
+  if (player.alive === false) return false;
+
+  const roleDef = ROLE_BY_ID.get(player.role_id) || ALL_ROLES.find((r) => r.role_id === player.role_id);
+  const isWolfTeam =
+    player.team === "Werewolf" ||
+    player.team === "Solo Werewolf" ||
+    player.team === "Werewolf-aligned" ||
+    roleDef?.category === "Werewolf" ||
+    roleDef?.team === "Werewolf";
+
+  if (!isWolfTeam) return false;
+
+  const actionType = player.action_type || roleDef?.action_type || "";
+  if (actionType === "Find Seer" || actionType === "Support Werewolves") {
+    return false;
+  }
+
+  // Fang Face (ROLE-061): Wakes with pack on Night 1; on subsequent nights, only wakes if sole surviving werewolf
+  if (player.role_id === "ROLE-061" || roleDef?.canonical_name === "Fang Face") {
+    if (nightCount > 1) {
+      const otherAliveWolves = allPlayers.some(
+        (other) =>
+          other.alive !== false &&
+          other.id !== player.id &&
+          (other.team === "Werewolf" ||
+            other.team === "Solo Werewolf" ||
+            other.team === "Werewolf-aligned" ||
+            ROLE_BY_ID.get(other.role_id)?.category === "Werewolf" ||
+            ROLE_BY_ID.get(other.role_id)?.team === "Werewolf") &&
+          (other.action_type || ROLE_BY_ID.get(other.role_id)?.action_type) !== "Find Seer" &&
+          (other.action_type || ROLE_BY_ID.get(other.role_id)?.action_type) !== "Support Werewolves"
+      );
+      if (otherAliveWolves) return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Authoritative Golden Engine helper: determines if a player can access WOLF_SECRET chat.
+ * Rules:
+ * - Must be alive
+ * - Must be wolf-side (team or category Werewolf / Werewolf-aligned / Solo Werewolf)
+ */
+export function canAccessWolfChat(
+  player: { id: string; role_id?: string; team?: string; category?: string; alive?: boolean }
+): boolean {
+  if (player.alive === false) return false;
+  const roleDef = player.role_id
+    ? ROLE_BY_ID.get(player.role_id) || ALL_ROLES.find((r) => r.role_id === player.role_id)
+    : undefined;
+  return (
+    player.team === "Werewolf" ||
+    player.team === "Solo Werewolf" ||
+    player.team === "Werewolf-aligned" ||
+    roleDef?.category === "Werewolf" ||
+    roleDef?.team === "Werewolf"
+  );
+}
+
+/**
  * Builds the prioritized queue of night actions for all alive players.
  */
 export function buildEngineNightActions(
@@ -130,37 +205,9 @@ export function buildEngineNightActions(
 
   // 1. Werewolf Group Action (Collective Kill)
   // Driven by DB category or team "Werewolf", excluding auxiliary roles that don't participate in pack kill
-  const aliveWerewolves = alivePlayers.filter((p) => {
-    const roleDef = ROLE_BY_ID.get(p.role_id);
-    const isWolfTeam =
-      p.team === "Werewolf" ||
-      p.team === "Solo Werewolf" ||
-      roleDef?.category === "Werewolf" ||
-      roleDef?.team === "Werewolf";
-    const actionType = p.action_type || roleDef?.action_type || "";
-    if (!isWolfTeam || actionType === "Find Seer" || actionType === "Support Werewolves") {
-      return false;
-    }
-
-    // Fang Face (ROLE-061): Wakes with pack on Night 1; on subsequent nights, only wakes if sole surviving werewolf
-    if (p.role_id === "ROLE-061" || roleDef?.canonical_name === "Fang Face") {
-      if (nightCount > 1) {
-        const otherAliveWolves = alivePlayers.some(
-          (other) =>
-            other.id !== p.id &&
-            (other.team === "Werewolf" ||
-              other.team === "Solo Werewolf" ||
-              ROLE_BY_ID.get(other.role_id)?.category === "Werewolf" ||
-              ROLE_BY_ID.get(other.role_id)?.team === "Werewolf") &&
-            (other.action_type || ROLE_BY_ID.get(other.role_id)?.action_type) !== "Find Seer" &&
-            (other.action_type || ROLE_BY_ID.get(other.role_id)?.action_type) !== "Support Werewolves"
-        );
-        if (otherAliveWolves) return false;
-      }
-    }
-
-    return true;
-  });
+  const aliveWerewolves = alivePlayers.filter((p) =>
+    canParticipateInWerewolfPackVote(p, alivePlayers, nightCount)
+  );
 
   if (aliveWerewolves.length > 0) {
     // Standard Werewolf pack attack

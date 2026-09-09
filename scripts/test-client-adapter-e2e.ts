@@ -106,9 +106,20 @@ async function runE2ETest() {
     ...joinData,
   ];
 
-  const connectClient = (id: string, name: string, token: string): Promise<TestClient> => {
+  const connectClient = async (id: string, name: string, token: string): Promise<TestClient> => {
+    // Exchange session token for a short-lived single-use WS ticket (mirrors production flow)
+    const ticketRes = await server.inject({
+      method: "POST",
+      url: "/api/auth/ws-ticket",
+      payload: { sessionToken: token },
+    });
+    if (ticketRes.statusCode !== 200) {
+      throw new Error(`Failed to obtain WS ticket for ${name}: ${ticketRes.body}`);
+    }
+    const { ticket } = JSON.parse(ticketRes.body);
+
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(`${wsBaseUrl}?roomId=${roomId}&token=${token}`);
+      const socket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
       const client: TestClient = {
         id,
         name,
